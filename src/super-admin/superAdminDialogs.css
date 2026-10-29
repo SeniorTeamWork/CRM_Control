@@ -1,0 +1,369 @@
+/* Mijozlar jadvali: nom va tahrirlash tugmasi bir qatorda */
+.sa-tenant-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: top;
+}
+
+.sa-table-wrap td:first-child .sa-tenant-name b {
+  display: inline;
+}
+
+.sa-tenant-edit {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #98a6c2;
+  transition: color .15s, background .15s, border-color .15s;
+}
+
+.sa-table-wrap tr:hover .sa-tenant-edit,
+.sa-tenant-edit:focus-visible {
+  color: #1463f3;
+  background: #eef4ff;
+  border-color: #d6e3fb;
+}
+
+.sa-tenant-edit:hover {
+  color: #fff;
+  background: #1463f3;
+  border-color: #1463f3;
+}
+
+/* Oynalar */
+.sa-modal {
+  backdrop-filter: blur(3px);
+}
+
+.sa-modal form.sa-dialog {
+  width: min(480px, 100%);
+  padding: 26px 26px 24px;
+  border-radius: 22px;
+  border: 1px solid #e6edfa;
+  box-shadow: 0 30px 70px #07132f33;
+  animation: sa-dialog-in .18s ease-out;
+}
+
+@keyframes sa-dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.sa-dialog .sa-close {
+  top: 16px;
+  right: 16px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #7083a8;
+  font-size: 0;
+}
+
+.sa-dialog .sa-close:hover {
+  background: #f1f5fd;
+  color: #15224b;
+}
+
+.sa-dialog-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding-right: 36px;
+  margin-bottom: 6px;
+}
+
+.sa-dialog-icon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #1463f3;
+  background: linear-gradient(135deg, #eaf2ff, #dfe9ff);
+}
+
+.sa-dialog-head h2 {
+  font-size: 19px;
+  line-height: 1.25;
+  color: #111a40;
+}
+
+.sa-dialog-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.sa-dialog label {
+  margin-top: 16px;
+}
+
+.sa-dialog input {
+  height: 46px;
+  border-radius: 11px;
+  background: #fbfcff;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+
+.sa-dialog input::placeholder {
+  color: #a3b0c8;
+  font-weight: 500;
+}
+
+.sa-dialog input:focus {
+  outline: 0;
+  background: #fff;
+  border-color: #1463f3;
+  box-shadow: 0 0 0 4px #1463f31f;
+}
+
+.sa-dialog-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sa-field-hint {
+  font-weight: 500;
+  font-size: 12px;
+  color: #8a98b4;
+}
+
+.sa-dialog .sa-primary {
+  height: 48px;
+  margin-top: 20px;
+  border-radius: 12px;
+}
+
+.sa-dialog .sa-primary:hover {
+  background: #0f56dc;
+}
+
+.sa-ghost-btn {
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid #dbe4f5;
+  border-radius: 12px;
+  background: #fff;
+  color: #34466d;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.sa-ghost-btn:hover:not(:disabled) {
+  background: #f4f7fd;
+}
+
+/* Yangi mijoz yaratilish holati */
+.sa-create-status {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 16px;
+  background: #f5f8ff;
+  border: 1px solid #e1e9f8;
+}
+
+.sa-create-status .sa-primary {
+  margin-top: 4px;
+}
+
+.sa-create-status-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  color: #15224b;
+}
+
+.sa-create-status p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sa-create-status.is-ready {
+  background: #effbf5;
+  border-color: #c9f0dc;
+}
+
+.sa-create-status.is-ready .sa-create-status-head svg {
+  color: #0caa62;
+}
+
+.sa-create-status.is-error {
+  background: #fff5f5;
+  border-color: #fbd5d5;
+}
+
+.sa-create-status.is-error .sa-create-status-head svg,
+.sa-create-status.is-error p {
+  color: #d92d2d;
+}
+
+.sa-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid #cfdcf7;
+  border-top-color: #1463f3;
+  animation: sa-spin .8s linear infinite;
+}
+
+@keyframes sa-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Mijozni o'chirish */
+.sa-danger-zone {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #fbe0e0;
+  background: #fffafa;
+}
+
+.sa-danger-zone.is-open {
+  background: #fff5f5;
+  border-color: #f7caca;
+}
+
+.sa-danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.sa-danger-row b {
+  display: block;
+  color: #b42323;
+  font-size: 14px;
+}
+
+.sa-danger-row small {
+  display: block;
+  margin-top: 3px;
+  color: #a46a6a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sa-danger-btn,
+.sa-danger-solid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+
+.sa-danger-btn {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #f3b9b9;
+  background: #fff;
+  color: #d92d2d;
+}
+
+.sa-danger-btn:hover {
+  background: #d92d2d;
+  border-color: #d92d2d;
+  color: #fff;
+}
+
+.sa-danger-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c22626;
+}
+
+.sa-danger-zone.is-open > p {
+  margin: 8px 0 0;
+  color: #a35757;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.sa-danger-zone input:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 4px #dc26261c;
+}
+
+.sa-danger-error {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #f6caca;
+  color: #c22626 !important;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.sa-danger-actions {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sa-danger-solid {
+  height: 44px;
+  padding: 0 16px;
+  border: 0;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 6px 16px #dc262633;
+}
+
+.sa-danger-solid:hover:not(:disabled) {
+  background: #c11f1f;
+}
+
+.sa-danger-solid:disabled,
+.sa-ghost-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 520px) {
+  .sa-dialog-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .sa-danger-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* Telefon: +998 o'zgarmaydi, faqat 9 ta raqam, bo'shliqlar o'zi qo'yiladi */
+.sa-dialog .sa-phone-input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+
+.sa-field-error {
+  margin: 8px 0 0;
+  color: #d92d2d !important;
+  font-size: 12px !important;
+  font-weight: 600;
+}
