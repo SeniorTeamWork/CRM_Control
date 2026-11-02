@@ -367,3 +367,47 @@
   font-size: 12px !important;
   font-weight: 600;
 }
+
+/* Yangi mijoz: direktor login/paroli bo'limi */
+.sa-dialog-section {
+  display: grid;
+  gap: 2px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #dfe7f6;
+}
+
+.sa-dialog-section b {
+  font-size: 14px;
+  color: #15224b;
+}
+
+.sa-dialog-section small {
+  font-size: 12px;
+  color: #8193b4;
+}
+
+.sa-dialog-section + .sa-dialog-row label {
+  margin-top: 10px;
+}
+
+.sa-dialog .sa-password input {
+  padding-right: 44px;
+}
+
+.sa-dialog .sa-password button {
+  top: 50%;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.sa-dialog .sa-password button:hover {
+  background: #eef3fd;
+  color: #1463f3;
+}

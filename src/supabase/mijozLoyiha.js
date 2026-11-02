@@ -4,7 +4,7 @@
 //   holat — loyiha tayyor bo'lsa, CRM jadvallarini o'rnatadi va "tayyor" deb belgilaydi
 //   ochir   — do'konni va uning loyihasini o'chiradi (har doim parol bilan)
 //   eslatma — Super Admin kirganda: login/parolni yopiq jadvalga yozadi va kirish kalitini qaytaradi
-import { markaz } from "./supabase";
+import { klientYarat, markaz } from "./supabase";
 
 // Edge Function nomi (Supabase -> Edge Functions ro'yxatidagi nom).
 export const MIJOZ_FUNKSIYASI = process.env.REACT_APP_MIJOZ_FUNKSIYASI || "smooth-task";
@@ -65,6 +65,25 @@ export async function superAdminEslatma({ login, parol }) {
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   return false;
+}
+
+// Yangi do'kon loyihasiga direktor hisobini yozadi. hisob — createCredentials() natijasi:
+// parol ochiq holda yuborilmaydi, faqat xesh va salt. Do'kon shu login/parol bilan kiradi.
+export async function direktorHisobiniYoz({ dokonId, taklif, hisob }) {
+  const { data, error } = await markaz.rpc("mijoz_loyihasi", { p_dokon: dokonId, p_taklif: taklif });
+  if (error) throw new Error(error.message);
+  const loyiha = (data || [])[0];
+  if (!loyiha?.supabase_url || !loyiha?.publishable_key) throw new Error("Do'kon loyihasi hali tayyor emas.");
+  const dokon = klientYarat(loyiha.supabase_url, loyiha.publishable_key);
+  const qator = { login: hisob.login, parol_hash: hisob.passwordHash, malumot: hisob };
+  const yangilandi = await dokon.from("xodimlar").update(qator).eq("dokon_id", dokonId).eq("rol", "direktor").select("id");
+  if (yangilandi.error) throw new Error(yangilandi.error.message);
+  if (yangilandi.data.length) return;
+  const qoshildi = await dokon.from("xodimlar").insert({
+    dokon_id: dokonId, ilova_id: "director", ism: "Direktor", lavozim: "Direktor", rol: "direktor",
+    holat: "active", hisob_faol: true, ...qator,
+  });
+  if (qoshildi.error) throw new Error(qoshildi.error.message);
 }
 
 // Loyiha tayyor bo'lguncha har bir necha soniyada so'raydi. bekor() true qaytarsa to'xtaydi.

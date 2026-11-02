@@ -24,3 +24,6 @@ export function mijozLoyihasigaUlan(url, key) {
 }
 
 export const alohidaLoyihami = () => supabase !== markaz;
+
+// Boshqa do'kon loyihasiga vaqtincha ulanish (masalan, Super Admin yangi do'konga direktor hisobini yozishi uchun).
+export const klientYarat = (url, key) => klient(url, key);
