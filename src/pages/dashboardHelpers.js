@@ -54,7 +54,7 @@ export const stockVisual = {
 };
 
 // Daily buckets for short periods; monthly buckets for the last year.
-export function buildSalesChart(sales, range, now = new Date()) {
+export function buildSalesChart(sales, range, now = new Date(), returns = [], productCosts = new Map()) {
   const day = (value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return null;
@@ -78,11 +78,20 @@ export function buildSalesChart(sales, range, now = new Date()) {
     if (!saleDay || saleDay > today || new Date(sale.createdAt || sale.date) > now) continue;
     const bucket = buckets.get(monthly ? saleDay.slice(0, 7) : saleDay);
     if (!bucket) continue;
-    const revenue = Number(sale.netAmount || 0);
-    const expenses = Number(sale.netCost || 0);
+    const revenue = Number(sale.amount ?? sale.netAmount ?? 0);
+    const expenses = Number(sale.grossCost ?? sale.netCost ?? 0);
     bucket.revenue += revenue;
     bucket.expenses += expenses;
-    bucket.profit += Math.max(0, revenue - expenses);
   }
-  return [...buckets.values()];
+  for (const item of returns) {
+    if (item.status !== "approved") continue;
+    const returnedDay = day(item.date || item.createdAt);
+    if (!returnedDay || returnedDay > today || new Date(item.date || item.createdAt) > now) continue;
+    const bucket = buckets.get(monthly ? returnedDay.slice(0, 7) : returnedDay);
+    if (!bucket) continue;
+    const returnedCost = Number(item.quantity || 0) * Number(item.unitCost ?? productCosts.get(String(item.productId)) ?? 0);
+    bucket.revenue -= Number(item.amount || 0);
+    bucket.expenses -= returnedCost;
+  }
+  return [...buckets.values()].map((bucket) => ({ ...bucket, profit: bucket.revenue - bucket.expenses }));
 }

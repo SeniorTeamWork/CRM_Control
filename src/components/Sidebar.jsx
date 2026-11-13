@@ -32,6 +32,8 @@ import {
   MessageCircle,
   FilePenLine,
   ClipboardList,
+  PackageX,
+  CalendarClock,
 } from "lucide-react";
 
 import { useLanguage } from "../context/LanguageContext";
@@ -39,7 +41,7 @@ import { canAccess } from "../data/accessStore";
 import { profileInitials, profileName } from "../data/profileStore";
 import ConfirmDialog from "./ConfirmDialog";
 
-const buildNavItems = (t) => [
+export const buildNavItems = (t) => [
   {
     id: "dashboard",
     label: t("sidebar.dashboard", "Dashboard"),
@@ -81,6 +83,12 @@ const buildNavItems = (t) => [
   },
 
   {
+    id: "pending-pickups",
+    label: "Kutishdagi tovarlar",
+    icon: CalendarClock,
+  },
+
+  {
     key: "products-group",
     label: t("sidebar.products", "Mahsulotlar"),
     icon: Package,
@@ -89,6 +97,11 @@ const buildNavItems = (t) => [
         id: "products-all",
         label: t("sidebar.products.all", "Barcha mahsulotlar"),
         icon: Package,
+      },
+      {
+        id: "defective-products",
+        label: t("sidebar.products.defective", "Brak mahsulotlar"),
+        icon: PackageX,
       },
       // {
       //   id: "inventory",
@@ -105,9 +118,21 @@ const buildNavItems = (t) => [
   },
 
   {
-    id: "suppliers",
+    key: "suppliers-group",
     label: t("sidebar.suppliers", "Ta'minotchilar"),
     icon: Truck,
+    children: [
+      {
+        id: "suppliers",
+        label: t("sidebar.suppliers", "Ta'minotchilar"),
+        icon: Truck,
+      },
+      {
+        id: "suppliers-returns",
+        label: t("sidebar.suppliers.returns", "Qaytarilgan tovarlar"),
+        icon: RotateCcw,
+      },
+    ],
   },
 
   {
@@ -136,6 +161,11 @@ const buildNavItems = (t) => [
       {
         id: "finance-debt",
         label: t("sidebar.finance.debt", "Qarzdorlik"),
+        icon: CreditCard,
+      },
+      {
+        id: "finance-payables",
+        label: t("sidebar.finance.payables", "Biz qarzdor"),
         icon: CreditCard,
       },
     ],
@@ -177,7 +207,7 @@ export default function Sidebar({
   const { t } = useLanguage();
   const companyName = useTenantCompanyName();
 
-  const sidebarActive = active.startsWith("customer-") ? "customers-all" : active.startsWith("product-") ? "products-all" : active.startsWith("supplier-") ? "suppliers" : active.startsWith("employee-") ? "employees" : active.startsWith("debt-") ? "finance-debt" : active;
+  const sidebarActive = active.startsWith("customer-") ? "customers-all" : active.startsWith("product-") ? "products-all" : active === "suppliers-returns" ? "suppliers-returns" : active.startsWith("supplier-") ? "suppliers" : active.startsWith("employee-") ? "employees" : active.startsWith("debt-") ? "finance-debt" : active;
 
   const navItems = buildNavItems(t)
     .map((item) => item.children
@@ -209,7 +239,7 @@ export default function Sidebar({
     };
   }, []);
 
-  const activeGroup = sidebarActive.startsWith("sales-") ? "sales-group" : sidebarActive === "products-all" ? "products-group" : sidebarActive.startsWith("finance-") ? "finance-group" : null;
+  const activeGroup = sidebarActive.startsWith("sales-") ? "sales-group" : sidebarActive === "products-all" || sidebarActive === "defective-products" ? "products-group" : sidebarActive === "suppliers" || sidebarActive === "suppliers-returns" ? "suppliers-group" : sidebarActive.startsWith("finance-") ? "finance-group" : null;
 
   useEffect(() => {
     if (activeGroup) setOpenGroups((groups) => groups.includes(activeGroup) ? groups : [...groups, activeGroup]);
@@ -261,7 +291,7 @@ export default function Sidebar({
       )}
 
       <aside
-        className={`flex flex-col h-full transition-all duration-300 ease-in-out ${isMobile ? "mobile-sidebar-active" : ""
+        className={`crm-sidebar flex flex-col h-full transition-all duration-300 ease-in-out ${isMobile ? "mobile-sidebar-active" : ""
           }`}
         style={{
           width: !isMobile && collapsed ? 64 : 248,
@@ -358,7 +388,7 @@ export default function Sidebar({
                         toggleGroup(item.key);
                       }
                     }}
-                    className="flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all group"
+                    className="crm-nav-item flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all group"
                     style={{
                       color: hasActive
                         ? "var(--brand, #6366f1)"
@@ -416,7 +446,7 @@ export default function Sidebar({
                               onClose();
                             }
                           }}
-                          className={`flex items-center w-full rounded-lg px-2.5 py-1.5 text-sm transition-all${child.id === "sales-pos" ? " active:scale-95" : ""}`}
+                          className={`crm-nav-child flex items-center w-full rounded-lg px-2.5 py-1.5 text-sm transition-all${child.id === "sales-pos" ? " active:scale-95" : ""}`}
                           style={{
                             color:
                               sidebarActive === child.id
@@ -466,7 +496,7 @@ export default function Sidebar({
                     onClose();
                   }
                 }}
-                className="flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all relative"
+                className="crm-nav-item flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all relative"
                 style={{
                   color: isActive
                     ? "var(--brand, #6366f1)"
@@ -515,7 +545,7 @@ export default function Sidebar({
               onNavigate("help");
               if (isMobile) onClose();
             }}
-            className="flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all"
+            className="crm-nav-item flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all"
             style={{
               color: "var(--text-muted, #6b7280)",
               background: "transparent",
@@ -540,7 +570,7 @@ export default function Sidebar({
 
           {/* SYSTEM ONLINE */}
           <button
-            className="flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all"
+            className="crm-nav-item flex items-center w-full rounded-xl px-2.5 py-2 text-sm transition-all"
             style={{
               color: "var(--text-muted, #6b7280)",
               cursor: "pointer",

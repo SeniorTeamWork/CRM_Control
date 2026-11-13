@@ -1,6 +1,7 @@
 import { migrateDocumentIds } from "./data/documentNumbers";
 import { useTenantCompanyName } from "./data/tenantBrand";
 import { translateText as tx } from "./locales/translateText";
+import { saveOrder } from "./data/ordersStore";
 import { useLanguage as useUILanguage } from "./context/LanguageContext";
 import './App.css';
 import './BackButton.css';
@@ -18,6 +19,7 @@ import Sales from "./pages/Sales";
 import POS from "./pages/PosWorkspace";
 import Returns from "./pages/Returns";
 import Products from "./pages/Products";
+import DefectiveProducts from "./pages/DefectiveProducts";
 import ProductDetail from "./pages/ProductDetail";
 // import Inventory from "./pages/Inventory";  <----- OMBOR 
 import Customers from "./pages/Customers";
@@ -27,6 +29,7 @@ import Employees from "./pages/Employees";
 import Ustolar from "./pages/ustolar"; // <--- Ustolar sahifasi ulandi
 import Finance from "./pages/Finance";
 import DebtManagement from "./pages/DebtManagement";
+import OurDebts from "./pages/OurDebts";
 import SupplierDetail from "./pages/SupplierDetail";
 import EmployeeDetail from "./pages/EmployeeDetail";
 import DebtDetail from "./pages/DebtDetail";
@@ -37,6 +40,7 @@ import Settings from "./pages/Settings";
 import AIChat from "./pages/AIChat";
 import Drafts from "./pages/Drafts";
 import Orders from "./pages/Orders";
+import PendingPickups from "./pages/PendingPickups";
 import Login from "./pages/Login";
 import { subscribeNotifications } from "./supabase/live";
 import { ACCESS_SECTIONS, canAccess, SESSION_KEY } from "./data/accessStore";
@@ -88,7 +92,7 @@ const Placeholder = ({ title, sub }) => (
 );
 
 // ── Router ──────────────────────────────────────────
-function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps, ustaProps, ordersProps) {
+function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps, ustaProps, ordersProps, saleSection = "", setSaleSection = () => {}, defectCatalogOpen = false, onSellDefect = () => {}, onDefectSaleStarted = () => {}, initialDefectItem = null, onSelectSaleSection = () => {}) {
   if (page.startsWith("customer-sale-")) {
     let saleCustomer = null;
     try {
@@ -137,21 +141,71 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
     return <DebtDetail debtorId={id} onBack={onBack} />;
   }
 
+  const isSaleWorkspace = page === "sales-new" || page === "sales-pos";
+  const navigateFromSaleSection = (nextPage) => {
+    if (nextPage === "sales-new" || nextPage === "sales-pos") {
+      setSaleSection("");
+      return;
+    }
+    onNavigate(nextPage);
+  };
+  const renderSelectedSaleSection = () => {
+    if (saleSection.startsWith("page:")) {
+      const sectionPage = saleSection.slice(5);
+      const closeSection = () => setSaleSection("");
+      if (["sales-new", "sales-pos"].includes(sectionPage) || !canAccess(user, sectionPage)) return null;
+      return <>
+        <button type="button" className="app-back-button" onClick={closeSection}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
+        {renderPage(sectionPage, navigateFromSaleSection, closeSection, user, onProfileSaved, posCartProps, ustaProps, ordersProps)}
+      </>;
+    }
+    if (saleSection === "Qoralama") {
+      return <Drafts onBack={() => setSaleSection("")} onNavigate={navigateFromSaleSection} />;
+    }
+    if (saleSection === "Band qilingan") {
+      return <>
+        {!ordersProps.isEditorOpen && <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>}
+        <Orders currentUser={user} onNavigate={navigateFromSaleSection} onBackButtonVisibilityChange={ordersProps.onBackButtonVisibilityChange} />
+      </>;
+    }
+    if (saleSection === "Qaytmalar") {
+      return <>
+        <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
+        <Returns />
+      </>;
+    }
+    if (saleSection === "Brak" && defectCatalogOpen) {
+      return <>
+        <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
+        <DefectiveProducts onSellDefect={onSellDefect} />
+      </>;
+    }
+    return null;
+  };
+  const selectedSaleSectionPage = isSaleWorkspace ? renderSelectedSaleSection() : null;
+  const defectCheckoutMode = saleSection === "Brak" && !defectCatalogOpen;
+
   switch (page) {
     case "dashboard":
       return <Dashboard onNavigate={onNavigate} />;
     case "sales-all":
       return <Sales onNavigate={onNavigate} />;
     case "sales-new":
-      return <POS key="primary-pos" {...posCartProps} currentUser={user} />;
+      if (selectedSaleSectionPage) return selectedSaleSectionPage;
+      return <POS key="primary-pos" {...posCartProps} currentUser={user} onSaveOrder={saveOrder} onSaleActionComplete={onSelectSaleSection} headingText={defectCheckoutMode ? "Sotuv bo‘limi" : undefined} saleSection={defectCheckoutMode ? "" : saleSection} saleSectionLabel={defectCheckoutMode ? "Brak" : saleSection} initialDefectItem={initialDefectItem} onDefectSaleStarted={onDefectSaleStarted} />;
     case "sales-pos":
-      return <POS key="additional-pos" {...posCartProps} currentUser={user} headingText="Sotuv bo‘limi" workspaceKey="crm_additional_pos_windows_v2" draftKeyPrefix="crm_additional_pos_v2_draft_" migrateLegacyDraft={false} salesStorageKey="crm_additional_pos_sales" customerStorageKey="crm_additional_pos_customers" salesDocumentType="additional-pos" />;
+      if (selectedSaleSectionPage) return selectedSaleSectionPage;
+      return <POS key="additional-pos" {...posCartProps} currentUser={user} onSaveOrder={saveOrder} onSaleActionComplete={onSelectSaleSection} headingText="Sotuv bo‘limi" workspaceKey="crm_additional_pos_windows_v2" draftKeyPrefix="crm_additional_pos_v2_draft_" migrateLegacyDraft={false} salesStorageKey="crm_additional_pos_sales" customerStorageKey="crm_additional_pos_customers" salesDocumentType="additional-pos" saleSection={defectCheckoutMode ? "" : saleSection} saleSectionLabel={defectCheckoutMode ? "Brak" : saleSection} initialDefectItem={initialDefectItem} onDefectSaleStarted={onDefectSaleStarted} />;
     case "sales-returns":
       return <Returns />;
     case "orders":
       return <Orders currentUser={user} onNavigate={onNavigate} {...ordersProps} />;
+    case "pending-pickups":
+      return <PendingPickups />;
     case "products-all":
       return <Products onNavigate={onNavigate} />;
+    case "defective-products":
+      return <DefectiveProducts onSellDefect={onSellDefect} />;
     case "categories":
       return (
         <Placeholder
@@ -175,7 +229,9 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
     case "customers-vip":
       return <Customers filter="vip" onNavigate={onNavigate} />;
     case "suppliers":
-      return <Suppliers onNavigate={onNavigate} />;
+      return <Suppliers key="supplier-list" onNavigate={onNavigate} section="suppliers" />;
+    case "suppliers-returns":
+      return <Suppliers key="suppliers-returns" onNavigate={onNavigate} section="returns" />;
     case "employees":
       return <Employees onNavigate={onNavigate} />;
     case "ustolar": // <--- Ustolar sahifasining yo'nalishi
@@ -185,6 +241,8 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
       return <Finance subpage={page} />;
     case "finance-debt":
       return <DebtManagement onNavigate={onNavigate} />;
+    case "finance-payables":
+      return <OurDebts onNavigate={onNavigate} />;
     case "reports":
       return <Reports />;
     case "notifications":
@@ -238,10 +296,21 @@ function Shell({ onLogout, user, initialPage }) {
   const [collapsed, setCollapsed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [posCartOpen, setPosCartOpen] = useState(false);
+  const [selectedSaleSection, setSelectedSaleSection] = useState("");
+  const [selectedSaleSectionWorkspace, setSelectedSaleSectionWorkspace] = useState("");
+  const [defectCatalogOpen, setDefectCatalogOpen] = useState(false);
+  const [pendingDefectSale, setPendingDefectSale] = useState(null);
   const [additionalPosTransitionLoading, setAdditionalPosTransitionLoading] = useState(false);
   const additionalPosBackTimerRef = useRef(null);
   const [ordersEditorOpen, setOrdersEditorOpen] = useState(false);
-  const isPosPage = page === "sales-new" || page === "sales-pos";
+  const isSaleWorkspacePage = page === "sales-new" || page === "sales-pos";
+  const activeSaleSection = selectedSaleSectionWorkspace === page ? selectedSaleSection : "";
+  const isSaleDraftSection = isSaleWorkspacePage && activeSaleSection === "Qoralama";
+  const isSaleOrdersSection = isSaleWorkspacePage && activeSaleSection === "Band qilingan";
+  const isSaleReturnsSection = isSaleWorkspacePage && activeSaleSection === "Qaytmalar";
+  const isSaleDefectCatalogSection = isSaleWorkspacePage && activeSaleSection === "Brak" && defectCatalogOpen;
+  const isEmbeddedSalePage = isSaleWorkspacePage && activeSaleSection.startsWith("page:");
+  const isPosPage = isSaleWorkspacePage && !isEmbeddedSalePage && !isSaleDraftSection && !isSaleOrdersSection && !isSaleReturnsSection && !isSaleDefectCatalogSection;
   const [profileUsta, setProfileUsta] = useState(null);
   const contentRef = useRef(null);
   const [unread, setUnread] = useState(0);
@@ -267,6 +336,10 @@ function Shell({ onLogout, user, initialPage }) {
         ? browserRoute : { page: getFirstAllowedPage(user), history: [] };
       // Tarix qisqarsa — orqaga qaytish, aks holda oldinga (brauzerning "oldinga" tugmasi).
       const direction = nextRoute.history.length < routeRef.current.history.length ? "back" : "forward";
+      if (nextRoute.page !== routeRef.current.page) {
+        setSelectedSaleSection("");
+        setSelectedSaleSectionWorkspace("");
+      }
       routeRef.current = nextRoute;
       runPageTransition(direction, () => setRoute(nextRoute));
       setIsSidebarOpen(false);
@@ -286,18 +359,26 @@ function Shell({ onLogout, user, initialPage }) {
   }, [user]);
 
   useEffect(() => {
+    if (!isSaleWorkspacePage) {
+      setSelectedSaleSection("");
+      setSelectedSaleSectionWorkspace("");
+    }
     contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     setPosCartOpen(false);
     setProfileUsta(null);
     setAdditionalPosTransitionLoading(false);
     window.clearTimeout(additionalPosBackTimerRef.current);
-  }, [page]);
+  }, [page, isSaleWorkspacePage]);
 
   useEffect(() => () => window.clearTimeout(additionalPosBackTimerRef.current), []);
 
   const navigateImmediately = (nextPage) => {
     const current = routeRef.current;
     if (current.page === nextPage) return;
+    if (current.page === "sales-new" || current.page === "sales-pos") {
+      setSelectedSaleSection("");
+      setSelectedSaleSectionWorkspace("");
+    }
     const nextRoute = {
       page: nextPage,
       history: [...current.history, current.page],
@@ -337,11 +418,42 @@ function Shell({ onLogout, user, initialPage }) {
     navigateImmediately(nextPage);
   };
 
+  const openDefectForSale = (item) => {
+    const targetWorkspace = "sales-pos";
+    setDefectCatalogOpen(false);
+    setPendingDefectSale(item);
+    if (page === targetWorkspace) {
+      setSelectedSaleSection("Brak");
+      setSelectedSaleSectionWorkspace(targetWorkspace);
+      return;
+    }
+    if (additionalPosBackTimerRef.current) return;
+    setAdditionalPosTransitionLoading(true);
+    additionalPosBackTimerRef.current = window.setTimeout(() => {
+      additionalPosBackTimerRef.current = null;
+      setAdditionalPosTransitionLoading(false);
+      navigateImmediately(targetWorkspace);
+      setSelectedSaleSection("Brak");
+      setSelectedSaleSectionWorkspace(targetWorkspace);
+    }, 1000);
+  };
+
+  const selectSaleSection = (section) => {
+    const targetWorkspace = page === "sales-new" || page === "sales-pos" ? page : "sales-new";
+    setSelectedSaleSection(section);
+    setSelectedSaleSectionWorkspace(targetWorkspace);
+    setDefectCatalogOpen(section === "Brak");
+    setPendingDefectSale(null);
+    if (page !== targetWorkspace) navigate(targetWorkspace);
+  };
+
+  const clearPendingDefectSale = () => setPendingDefectSale(null);
+
   const goBack = () => {
     if (routeRef.current.history.length > 0) window.history.back();
   };
 
-  const hasOwnBackButton = page === "drafts" || detailPagePrefixes.some((prefix) => page.startsWith(prefix));
+  const hasOwnBackButton = isEmbeddedSalePage || page === "drafts" || isSaleDraftSection || isSaleOrdersSection || isSaleReturnsSection || isSaleDefectCatalogSection || detailPagePrefixes.some((prefix) => page.startsWith(prefix));
   const handleShellBack = () => {
     if (page === "ustolar" && profileUsta) {
       setProfileUsta(null);
@@ -385,10 +497,10 @@ function Shell({ onLogout, user, initialPage }) {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Topbar onNavigate={navigate} notifCount={unread} user={user} profile={profile} />
+        <Topbar onNavigate={navigate} onSelectSaleSection={selectSaleSection} notifCount={unread} user={user} profile={profile} />
         <div style={{ position: "relative", display: "flex", flex: "1 1 0%", flexDirection: "column", minHeight: 0, minWidth: 0, isolation: "isolate" }}>
         <main ref={contentRef} className={`app-main-view flex-1 overflow-y-auto p-6 ${isPosPage ? "app-pos-main" : ""}${page === "ai-chat" ? " ai-chat-shell-scroll" : ""}`} style={page === "sales-pos" ? { paddingLeft: "clamp(12px, 1.2vw, 24px)", paddingRight: "clamp(12px, 1.2vw, 24px)" } : undefined}>
-          <div className={isPosPage ? "app-pos-content" : undefined} style={{ maxWidth: page === "sales-pos" ? "none" : 1400, margin: page === "sales-pos" ? 0 : "0 auto", width: "100%" }}>
+          <div className={`${isPosPage ? "app-pos-content" : "app-page-content"}${page === "sales-pos" || page === "drafts" ? " app-page-content-fluid" : ""}`}>
 
             {(history.length > 0 || (page === "ustolar" && profileUsta) || (isPosPage && posCartOpen)) && !hasOwnBackButton && !(page === "orders" && ordersEditorOpen) && (
               <button
@@ -402,7 +514,7 @@ function Shell({ onLogout, user, initialPage }) {
             {tx(canAccess(user, page) ? renderPage(page, navigate, goBack, user, setProfile, {
               cartWindowOpen: posCartOpen,
               onCartWindowChange: setPosCartOpen,
-            }, { profileUsta, setProfileUsta }, { onBackButtonVisibilityChange: setOrdersEditorOpen }) : null)}
+            }, { profileUsta, setProfileUsta }, { onBackButtonVisibilityChange: setOrdersEditorOpen, isEditorOpen: ordersEditorOpen }, activeSaleSection, setSelectedSaleSection, defectCatalogOpen, openDefectForSale, clearPendingDefectSale, pendingDefectSale, selectSaleSection) : null)}
           </div>
         </main>
         <div id="main-modal-root" style={{ position: "absolute", inset: 0, zIndex: 100, pointerEvents: "none" }} />

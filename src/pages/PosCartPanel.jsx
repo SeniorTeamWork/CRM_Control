@@ -12,6 +12,8 @@ import {
   FiPhone,
   FiX,
   FiFileText,
+  FiClock,
+  FiBookmark,
   FiMapPin,
   FiCreditCard,
 } from "react-icons/fi";
@@ -33,6 +35,9 @@ export function CartPanelContent({
   selectedAddressId,
   setSelectedAddressId,
   addDeliveryAddress,
+  deliveryDate,
+  setDeliveryDate,
+  setDeliveryDateSelected,
   confirmDeliveryAddresses,
   moveItemToAddress,
   deliveryAddress,
@@ -53,6 +58,7 @@ export function CartPanelContent({
   handleCheckout,
   handleOpenReceipt,
   onSaveDraft,
+  onReserveOrder,
   hideSaveDraftButton = false,
   customerError,
   paymentOpen,
@@ -111,10 +117,23 @@ export function CartPanelContent({
   };
 
   const confirmAddress = () => {
-    if (!confirmDeliveryAddresses() && addresses.length < 2) {
-      addressInputRef.current?.focus();
+    if (!confirmDeliveryAddresses()) {
+      if (addresses.length <= 1) addressInputRef.current?.focus();
     }
   };
+
+  const selectedDeliveryAddress = addresses.find((address) => address.id === selectedAddressId) || addresses[0];
+  const hasOtherUnconfirmedAddress = addresses.some((address) => address.id !== selectedAddressId && !address.deliveryDateConfirmed);
+  const allDeliveryAddressesConfirmed = addressConfirmed && addresses.length > 1 && addresses.every((address) => address.deliveryDateConfirmed);
+  const addressConfirmLabel = addresses.length <= 1
+    ? addressConfirmed ? "Manzil tasdiqlandi" : "Manzilni tasdiqlash"
+    : allDeliveryAddressesConfirmed
+      ? "Barcha manzillar tasdiqlandi"
+      : hasOtherUnconfirmedAddress
+        ? selectedDeliveryAddress?.deliveryDateConfirmed ? "Keyingi manzilga o'tish" : "Manzilni tasdiqlash va keyingi manzil"
+        : selectedDeliveryAddress?.deliveryDateConfirmed
+          ? "Manzilni qayta tasdiqlash"
+          : "Manzilni tasdiqlash";
 
   const saveAddress = (event) => {
     event.preventDefault();
@@ -201,8 +220,10 @@ export function CartPanelContent({
                 >
                   <div className="item-details">
                     <div className="item-name">
-                      {item.name}
+                      <span className="pos-cart-item-title">{item.name}</span>
+                      {item.isDefectSale && <span className="pos-cart-defect-badge">{tx("Brak")}</span>}
                     </div>
+                    {item.isDefectSale && (item.defectStatus || item.defectReason) && <small style={{ display: "block", marginTop: 2, color: "var(--danger)" }}>{[item.defectStatus && tx(item.defectStatus), item.defectReason && tx(item.defectReason)].filter(Boolean).join(" · ")}</small>}
                     <div className="pos-cart-item-qty-label">{tx(item.qty)}{tx(" dona")}</div>
                     {addresses.length > 1 && (
                       <select
@@ -348,6 +369,9 @@ export function CartPanelContent({
           setSelectedCardId={setSelectedCardId}
           debtDueDate={debtDueDate}
           setDebtDueDate={setDebtDueDate}
+          deliveryDate={deliveryDate}
+          setDeliveryDate={setDeliveryDate}
+          setDeliveryDateSelected={setDeliveryDateSelected}
           error={paymentError}
           setError={setPaymentError}
           completed={paymentComplete}
@@ -387,6 +411,7 @@ export function CartPanelContent({
             />
 
             <input
+              id="pos-customer-name"
               type="text"
               placeholder={tx("Ism (majburiy)")}
               value={customerName}
@@ -395,12 +420,17 @@ export function CartPanelContent({
               }}
               className="customer-input"
               style={{ outline: "none" }}
+              autoComplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="pos-customer-suggestions"
+              aria-expanded={customerSuggestions.length > 0}
             />
           </div>
           {customerSuggestions.length > 0 && (
-            <div className="customer-suggestions" role="listbox" aria-label={tx("Mijozlar")}>
+            <div id="pos-customer-suggestions" className="customer-suggestions" role="listbox" aria-label={tx("Mijozlar")}>
               {customerSuggestions.map((customer) => (
-                <button key={`${customer.name}-${customer.phone}`} type="button" role="option" aria-selected={false} onClick={() => selectCustomer(customer)}>
+                <button key={`${customer.name}-${customer.phone}`} type="button" role="option" aria-selected={false} onMouseDown={(event) => event.preventDefault()} onClick={() => selectCustomer(customer)}>
                   <span>{customer.name}</span>
                   {customer.phone && <small>+998 {customer.phone.replace(/(\d{2})(\d{3})(\d{2})(\d{2})/, "$1 $2 $3 $4")}</small>}
                 </button>
@@ -542,10 +572,10 @@ export function CartPanelContent({
           {addressError && <span className="customer-error-text">{tx(addressError)}</span>}
           <button
             type="button"
-            className={addressConfirmed ? "pos-address-confirm is-confirmed" : "pos-address-confirm"}
+            className={allDeliveryAddressesConfirmed || (addresses.length <= 1 && addressConfirmed) ? "pos-address-confirm is-confirmed" : "pos-address-confirm"}
             onClick={confirmAddress}
           >
-            {tx(addressConfirmed ? "Manzil tasdiqlandi" : "Manzilni tasdiqlash")}
+            {tx(addressConfirmLabel)}
           </button>
         </div>
         </div>
@@ -585,14 +615,24 @@ export function CartPanelContent({
 
         {reservationMode ? (
           <p className="pos-reservation-note">{tx("Saqlanganda mahsulotlar buyurtmaga band qilinadi, ombor qoldig‘i o‘zgarmaydi.")}</p>
-        ) : !hideSaveDraftButton && <button
-          type="button"
-          className="pos-save-draft-btn"
-          onClick={onSaveDraft}
-          disabled={cart.length === 0}
-        >
-          <FiFileText size={16} />{tx("Sotuvni saqlash")}
-        </button>}
+        ) : !hideSaveDraftButton && <div className="pos-save-actions">
+          <button
+            type="button"
+            className="pos-save-draft-btn"
+            onClick={onSaveDraft}
+            disabled={cart.length === 0}
+          >
+            <FiClock size={16} />{tx("Vaqtincha saqlash")}
+          </button>
+          <button
+            type="button"
+            className="pos-reserve-btn"
+            onClick={onReserveOrder}
+            disabled={cart.length === 0}
+          >
+            <FiBookmark size={16} />{tx("Band qilish")}
+          </button>
+        </div>}
 
         {(!reservationMode || allowReservationCheckout) && <button
           type="button"

@@ -6,7 +6,7 @@ import { prefersReducedMotion } from "../utils/motion";
 
 // Yopilish animatsiyasi davomiyligi (src/styles/motion.css dagi m-alert-out bilan mos).
 const CONFIRM_EXIT_MS = 160;
-
+  
 export default function ConfirmDialog({ open, title, message, confirmLabel = "Ha", confirmDanger = false, onConfirm, onCancel }) {
   useUILanguage();
   const cancelRef = useRef(null);

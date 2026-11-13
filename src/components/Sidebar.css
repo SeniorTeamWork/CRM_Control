@@ -484,3 +484,43 @@
     opacity: 1;
   }
 }
+
+/* CRM navigation surface */
+.crm-sidebar {
+  border-right-color: var(--border) !important;
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--border) 70%, transparent) !important;
+}
+
+.crm-sidebar nav {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-faint) 35%, transparent) transparent;
+}
+
+.crm-nav-item,
+.crm-nav-child {
+  min-height: 38px;
+  border-radius: 10px !important;
+  transition: color .16s ease, background-color .16s ease, transform .16s ease;
+}
+
+.crm-nav-item:hover,
+.crm-nav-child:hover {
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface)) !important;
+  color: var(--brand) !important;
+}
+
+.crm-nav-item:focus-visible,
+.crm-nav-child:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.crm-nav-child {
+  min-height: 34px;
+}
+
+@media (max-width: 700px) {
+  .crm-sidebar {
+    box-shadow: 14px 0 36px rgba(15, 23, 42, .18) !important;
+  }
+}

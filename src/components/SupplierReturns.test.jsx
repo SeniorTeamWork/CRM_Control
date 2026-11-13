@@ -1,0 +1,14 @@
+import React,{act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {SupplierReturnPrompt,formatQuantityInput,capQuantityInput} from './SupplierReturns';
+import {supplierReturnFromItem} from '../supabase/mappers';
+jest.mock('./Modal',()=>({__esModule:true,default:({open,children})=>open?<div>{children}</div>:null,Field:({children})=><div>{children}</div>}));
+const record={version:2,id:'r1',supplierId:1,supplierName:'Supplier',productName:'Phone',goodQuantity:2,defectiveQuantity:1,goodUnitCost:100,defectUnitCost:40,amount:240,debtOffset:150,refundDue:90,refundedAmount:50,measurementUnit:'dona',returnedAt:'2026-11-12T08:30:00.000Z'};
+test('quantity input groups thousands and keeps decimal quantities',()=>{expect(formatQuantityInput('1234567')).toBe('1,234,567');expect(formatQuantityInput('1234567.25')).toBe('1,234,567.25');expect(formatQuantityInput('1234.')).toBe('1,234.');});
+test('quantity entry cannot exceed the remaining receipt limit',()=>{expect(capQuantityInput('700000',70,'dona')).toBe('70');expect(capQuantityInput('10,000',10,'dona')).toBe('10');expect(capQuantityInput('0.75',1,'kg')).toBe('0.75');expect(capQuantityInput('5.25',5,'kg')).toBe('5');expect(capQuantityInput('20',0,'dona')).toBe('0');});
+let host,root;
+beforeEach(()=>{global.IS_REACT_ACT_ENVIRONMENT=true;jest.useFakeTimers();host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);window.open=jest.fn();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();jest.useRealTimers();});
+test('five seconds closes prompt without printing',async()=>{const close=jest.fn();await act(async()=>root.render(<SupplierReturnPrompt record={record} close={close}/>));await act(async()=>jest.advanceTimersByTime(4999));expect(close).not.toHaveBeenCalled();await act(async()=>jest.advanceTimersByTime(1));expect(close).toHaveBeenCalledTimes(1);expect(window.open).not.toHaveBeenCalled();});
+test('receipt prints only on click',async()=>{const popup={document:{write:jest.fn(),close:jest.fn()},focus:jest.fn(),print:jest.fn()};window.open.mockReturnValue(popup);const close=jest.fn();await act(async()=>root.render(<SupplierReturnPrompt record={record} close={close}/>));await act(async()=>host.querySelector('button').click());expect(popup.print).toHaveBeenCalledTimes(1);expect(popup.document.write.mock.calls[0][0]).toContain('Phone');expect(close).toHaveBeenCalledTimes(1);});
+test('Supabase reload retains receipt, defect prices and remaining refund',()=>{const restored=supplierReturnFromItem({malumot:record},{ilova_id:1,buyurtmalar:[]},{appIdOf:()=>null});expect(restored).toMatchObject(record);});

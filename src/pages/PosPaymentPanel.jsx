@@ -38,6 +38,9 @@ export function PosPaymentPanel({
   selectedCardId, setSelectedCardId,
   debtDueDate,
   setDebtDueDate,
+  deliveryDate = "",
+  setDeliveryDate = () => {},
+  setDeliveryDateSelected = () => {},
   error,
   setError,
   completed,
@@ -129,6 +132,28 @@ export function PosPaymentPanel({
             />
           </label>
           <small>{tx("Qolgan qarz shu sanagacha to'lanishi kerak")}</small>
+        </div>
+
+        <div className="pos-payment-fieldset pos-payment-due-date">
+          <strong>{tx("Yetkazib berish sanasi (ixtiyoriy)")}</strong>
+          <label>
+            <FiCalendar size={15} aria-hidden="true" />
+            <input
+              type="date"
+              min={formatDateInputValue(new Date())}
+              value={deliveryDate || ""}
+              onFocus={() => setDeliveryDateSelected(true)}
+              onChange={(event) => {
+                setDeliveryDate(event.target.value);
+                setDeliveryDateSelected(Boolean(event.target.value));
+                setError("");
+              }}
+              disabled={completed}
+              aria-label={tx("Yetkazib berish sanasi (ixtiyoriy)")}
+            />
+            {deliveryDate && !completed && <button type="button" className="pos-payment-date-clear" onClick={() => { setDeliveryDate(""); setDeliveryDateSelected(false); }}>{tx("Tozalash")}</button>}
+          </label>
+          <small>{tx("Sana tanlansa, mahsulot Kutishdagi tovarlar bo'limida ko'rinadi")}</small>
         </div>
 
         <div className="pos-payment-fieldset">

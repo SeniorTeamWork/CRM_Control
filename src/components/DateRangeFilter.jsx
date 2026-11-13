@@ -10,9 +10,15 @@ export const matchesDateRange = (value, from, to) => {
   return !!day && (!from || day >= from) && (!to || day <= to);
 };
 
-export default function DateRangeFilter({ from, to, onFromChange, onToChange }) {
+export default function DateRangeFilter({ from, to, onFromChange, onToChange, applyOnEnter = false }) {
+  const applyDate = (event, onChange) => {
+    if (!applyOnEnter || event.key !== "Enter" || !event.currentTarget.validity.valid) return;
+    event.preventDefault();
+    onChange(event.currentTarget.value);
+    event.currentTarget.blur();
+  };
   return <div className="flex items-center gap-2 flex-wrap">
-    <label className="flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Dan")}<input aria-label={tx("Boshlanish sanasi")} type="date" className="input-base" value={from} onChange={(e) => onFromChange(e.target.value)} style={{ width: 145 }} /></label>
-    <label className="flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Gacha")}<input aria-label={tx("Tugash sanasi")} type="date" className="input-base" value={to} min={from || undefined} onChange={(e) => onToChange(e.target.value)} style={{ width: 145 }} /></label>
+    <label className="flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Dan")}<input aria-label={tx("Boshlanish sanasi")} type="date" className="input-base" value={from} onKeyDown={(event) => applyDate(event, onFromChange)} onChange={(e) => onFromChange(e.target.value)} style={{ width: 145 }} /></label>
+    <label className="flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Gacha")}<input aria-label={tx("Tugash sanasi")} type="date" className="input-base" value={to} onKeyDown={(event) => applyDate(event, onToChange)} min={from || undefined} onChange={(e) => onToChange(e.target.value)} style={{ width: 145 }} /></label>
   </div>;
 }

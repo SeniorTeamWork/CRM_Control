@@ -110,3 +110,13 @@
   .drafts-page:not(.draft-detail):not(.draft-sale-page) .draft-note footer{padding:4px 8px}
   .drafts-page:not(.draft-detail):not(.draft-sale-page) .draft-note time{font-size:9px}
 }
+
+/* Let the drafts collection use the full available content width. */
+.drafts-page:not(.draft-detail):not(.draft-sale-page){width:100%;max-width:none;margin:0}
+
+main.app-main-view:has(.drafts-page.draft-sale-page) { padding: 0 !important; }
+main.app-main-view:has(.drafts-page.draft-sale-page) > div { width: 100%; max-width: none !important; height: 100%; margin: 0 !important; }
+.drafts-page.draft-sale-page { display: flex; flex-direction: column; width: 100%; max-width: none; height: 100%; min-height: 0; margin: 0; }
+.draft-sale-topbar { padding: 12px 18px; }
+.draft-sale-content { flex: 1 1 0%; }
+.draft-sale-page .pos-window-bar { padding-left: 18px; }

@@ -67,6 +67,14 @@ export default function Sales({ onNavigate }) {
     const payments = readDebtPayments();
     setSales([...readPosSales()].map((sale) => withDebtBalance(sale, payments)));
   }, [dataVersion]);
+  const approvedReturns = (getReturns() || []).filter((item) => item.status === "approved");
+  const salesWithReturns = sales.map((sale) => {
+    const returnedAmount = approvedReturns.filter((item) => String(item.saleId) === String(sale.id)).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const amount = Math.max(0, Number(sale.amount || 0) - returnedAmount);
+    const debtBalance = Math.max(0, Number(sale.debtBalance || 0) - Math.min(Number(sale.debtBalance || 0), returnedAmount));
+    const paidAmount = Math.min(amount, Number(sale.paidAmount || 0));
+    return { ...sale, amount, paidAmount, debtBalance, returnedAmount, status: amount === 0 && returnedAmount > 0 ? "returned" : debtBalance > 0 ? (paidAmount > 0 ? "partial" : "debt") : "paid" };
+  });
 
   const [exportOpen, setExportOpen] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -97,7 +105,7 @@ export default function Sales({ onNavigate }) {
     const name = sale.customer.trim();
     const sameName = (customer) =>
       customer.name.trim().toLowerCase() === name.toLowerCase();
-    const customerSales = sales.filter((item) => sameName({ name: item.customer }));
+    const customerSales = salesWithReturns.filter((item) => sameName({ name: item.customer }));
     const debtAmount = customerSales
       .reduce((sum, item) => sum + Number(item.debtBalance || 0), 0);
     const saleCustomer = {
@@ -118,7 +126,7 @@ export default function Sales({ onNavigate }) {
 
   /* ================= FILTER ================= */
 
-  const filtered = sales.filter((sale) => {
+  const filtered = salesWithReturns.filter((sale) => {
     const searchText = normalizeProductText(search);
 
     const matchSearch =
@@ -130,7 +138,7 @@ export default function Sales({ onNavigate }) {
         ? Number(sale.debtBalance || 0) > 0
         : sale.status === statusFilter);
 
-    return matchSearch && matchStatus && saleMatchesProduct(sale, productCatalog, productFilter) && matchesDateRange(sale.createdAt || sale.date, dateFrom, dateTo);
+    return matchSearch && matchStatus && saleMatchesProduct(sale, productCatalog, productFilter) && matchesDateRange(sale.createdAt || sale.date, dateFrom, dateTo || dateFrom);
   });
 
   /* ================= DELETE ================= */
@@ -165,7 +173,7 @@ export default function Sales({ onNavigate }) {
     setExportBusy(true);
     setExportError("");
     try {
-      const rows = salesForPeriod(sales, period), blob = createSalesWord(rows, period);
+      const rows = salesForPeriod(salesWithReturns, period), blob = createSalesWord(rows, period);
       const url = URL.createObjectURL(blob), link = document.createElement("a");
       const rangeName = period.type === "month" ? `${period.year}-${String(period.month).padStart(2, "0")}` : period.type === "week" ? `${period.year}-${String(period.month).padStart(2, "0")}-hafta-${period.week}` : period.type === "year" ? String(period.year) : "bugungi";
       link.href = url;
@@ -180,27 +188,14 @@ export default function Sales({ onNavigate }) {
 
   /* ================= STATS ================= */
 
-  const returns = (() => {
-    try {
-      const saved = getReturns();
-      return Array.isArray(saved) ? saved.filter((item) => item.status === "approved") : [];
-    } catch { return []; }
-  })();
-  const adjustedSales = sales.map((sale) => {
-    const returnedAmount = returns
-      .filter((item) => String(item.saleId) === String(sale.id))
-      .reduce((total, item) => total + Number(item.amount || 0), 0);
-    return { ...sale, returnedAmount, netAmount: Math.max(0, Number(sale.amount || 0) - returnedAmount) };
-  });
-  const totalSalesAmount = adjustedSales.reduce((total, sale) => total + sale.netAmount, 0);
+  const adjustedSales = salesWithReturns;
+  const totalSalesAmount = adjustedSales.reduce((total, sale) => total + Number(sale.amount || 0), 0);
   const today = new Date().toDateString();
-  const todaySalesAmount = adjustedSales
-    .filter((sale) => {
-      const date = new Date(sale.createdAt || sale.date);
-      return !Number.isNaN(date.getTime()) && date.toDateString() === today;
-    })
-    .reduce((total, sale) => total + sale.netAmount, 0);
-  const totalReturnedAmount = returns.reduce((total, item) => total + Number(item.amount || 0), 0);
+  const todaySalesAmount = sales
+    .filter((sale) => { const date = new Date(sale.createdAt || sale.date); return !Number.isNaN(date.getTime()) && date.toDateString() === today; })
+    .reduce((total, sale) => total + Number(sale.amount || 0), 0)
+    - approvedReturns.filter((item) => { const date = new Date(item.date || item.createdAt); return !Number.isNaN(date.getTime()) && date.toDateString() === today; }).reduce((total, item) => total + Number(item.amount || 0), 0);
+  const totalReturnedAmount = approvedReturns.reduce((total, item) => total + Number(item.amount || 0), 0);
 
   const stats = [
     {
@@ -370,7 +365,7 @@ export default function Sales({ onNavigate }) {
           </div>
 
           <SalesProductFilter products={productCatalog} value={productFilter} onChange={setProductFilter} />
-          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} applyOnEnter />
 
           <div className="sales-filters">
 
@@ -476,7 +471,9 @@ export default function Sales({ onNavigate }) {
                       {tx(sale.products)}{tx(" ta")}</td>
 
                     <td className="sales-amount">
-                      {formatCurrency(sale.amount)}</td>
+                      <div>{formatCurrency(sale.amount)}</div>
+                      {sale.returnedAmount > 0 && <small style={{ display: "block", marginTop: 3, color: "var(--danger)", fontSize: 11 }}>{tx("Qaytarildi")}: − {formatCurrency(sale.returnedAmount)}</small>}
+                    </td>
 
                     <td className="sales-muted">
                       {tx(sale.payment)}

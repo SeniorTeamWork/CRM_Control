@@ -1,5 +1,6 @@
 import { getData, setData } from "../supabase/db";
 const KEY = "crm_customer_orders_v1";
+export const defectReservationKey = (productId, defectId) => `${String(productId)}::${String(defectId)}`;
 
 export function readOrders() {
   try {
@@ -43,4 +44,21 @@ export function reservedQuantities(excludeOrderId = null, orders = readOrders())
     });
     return reserved;
   }, {});
+}
+
+export function reservedQuantitiesByCondition(excludeOrderId = null, orders = readOrders()) {
+  return orders.reduce((reserved, order) => {
+    if (order.status !== "reserved" || String(order.id) === String(excludeOrderId)) return reserved;
+    (order.cart || []).forEach((item) => {
+      const id = String(item.id);
+      const itemCondition = String(item.condition || item.stockCondition || item.kind || "").toLocaleLowerCase("uz-UZ");
+      const condition = item.isDefectSale || item.isDefective || item.defectId || ["defective", "defect", "brak", "yaroqsiz"].includes(itemCondition) ? "defective" : "good";
+      reserved[condition][id] = (reserved[condition][id] || 0) + Math.max(0, Number(item.qty) || 0);
+      if (condition === "defective" && item.defectId != null) {
+        const key = defectReservationKey(id, item.defectId);
+        reserved.defectiveLots[key] = (reserved.defectiveLots[key] || 0) + Math.max(0, Number(item.qty) || 0);
+      }
+    });
+    return reserved;
+  }, { good: {}, defective: {}, defectiveLots: {} });
 }

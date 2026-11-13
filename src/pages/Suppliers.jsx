@@ -17,13 +17,15 @@ import {
   UserPlus,
   DollarSign,
   AlertCircle,
+  ChevronDown,
 } from "lucide-react";
 
 import Modal, { Field } from "../components/Modal";
 import PhoneInput from "../components/PhoneInput";
 import { useToast } from "../context/ToastContext";
 import DateRangeFilter, { matchesDateRange } from "../components/DateRangeFilter";
-import { getData, useDataVersion } from "../supabase/db";
+import SupplierReturnsLedger from "../components/SupplierReturns";
+import { getData, useData, useDataVersion } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getSupplierReceipts, getSuppliers, saveSupplierOrders, saveSupplierReceipts, saveSuppliers } from "../supabase/bolimlar/taminotchilar";
 
@@ -41,44 +43,208 @@ const statusMap = {
 };
 
 const emptyProduct = {
-  productName: "", brand: "", sku: "", category: "", packaging: "", extraMeasurement: "", extraMeasurementValue: "",
-  receivedQuantity: "", unitsPerPackage: "", liters: "", weight: "", volume: "",
-  length: "", width: "", height: "", cost: "", price: "", measurementType: "count",
+  productName: "", description: "", brand: "", sku: "", category: "", packaging: "", extraMeasurement: "", extraMeasurementValue: "",
+  receivedQuantity: "", defectiveQuantity: "", defectStatus: "", defectReason: "", defectUnitPrice: "", unitsPerPackage: "", liters: "", weight: "", volume: "",
+  length: "", width: "", height: "", cost: "", price: "", measurementType: "count", measurementUnit: "dona",
 };
+const measurementUnits = ["dona", "metr", "santimetr", "millimetr", "kilometr", "kilogramm", "gramm", "milligramm", "litr", "millilitr", "quti", "karobka", "paket", "qop", "rulon", "juft", "to'plam"];
+const normalizedUnit = (value) => String(value || "").trim().toLocaleLowerCase("uz-UZ");
+const isMeterUnit = (value) => ["metr", "meter", "m"].includes(normalizedUnit(value));
+const allowsDecimalUnit = (value) => ["metr", "meter", "m", "santimetr", "sm", "cm", "millimetr", "mm", "kilometr", "km", "kilogramm", "kg", "gramm", "g", "milligramm", "mg", "litr", "l", "millilitr", "ml"].includes(normalizedUnit(value));
+const unitLabel = (item) => item?.measurementUnit || (item?.measurementType === "weight" ? "kg" : "dona");
+const emptyShipmentInfo = { farmName: "", tripNumber: "" };
+const createReceiptSupplierGroup = () => ({ key: `receipt-supplier-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: "", phone: "", address: "", existingSupplierId: "", expanded: true });
 
 const pickProduct = (source) => Object.fromEntries(
-  [...Object.keys(emptyProduct), "existingId"].map((key) => [key, source[key]])
+  [...Object.keys(emptyProduct), "existingId", "supplierId"].map((key) => [key, source[key]])
 );
 const hasDuplicateProducts = (drafts) => {
-  const keys = drafts.map((item) => String(item.existingId || item.productName || "").trim().toLocaleLowerCase("uz-UZ"));
+  const keys = drafts.map((item) => `${item.supplierId || ""}:${String(item.existingId || item.productName || "").trim().toLocaleLowerCase("uz-UZ")}`);
   return new Set(keys).size !== keys.length;
 };
 const readList = (key) => { try { const value = getData(key, []); return Array.isArray(value) ? value : []; } catch { return []; } };
 const moneyValue = (value) => Number(String(value ?? "").replace(/[^\d]/g, "")) || 0;
+const quantityInputValue = (value, allowDecimal) => {
+  const normalized = String(value ?? "").replace(/,/g, ".").replace(allowDecimal ? /[^\d.]/g : /\D/g, "");
+  if (!allowDecimal) return normalized.replace(/^0+(?=\d)/, "");
+  const [whole, ...fractionParts] = normalized.split(".");
+  const fraction = fractionParts.join("").replace(/\./g, "");
+  const cleanWhole = whole.replace(/^0+(?=\d)/, "");
+  return normalized.includes(".") ? `${cleanWhole || "0"}.${fraction}` : cleanWhole;
+};
 const moneyText = (value) => formatCurrency(value);
+const defectQuantityOf = (product) => Math.max(0, Number(product.defectiveQuantity) || 0);
+const defectTotalOf = (product) => defectQuantityOf(product) * moneyValue(product.defectUnitPrice);
+const createDefectEntry = (draft, productId, supplier, receiptId, date) => {
+  const quantity = defectQuantityOf(draft);
+  if (!quantity) return null;
+  const unitPrice = moneyValue(draft.defectUnitPrice);
+  return {
+    id: `${receiptId}-${productId}-defect`,
+    productId,
+    product: capitalizeStart(draft.productName.trim()),
+    category: draft.category.trim() || "Boshqa",
+    quantity,
+    status: "Brak",
+    reason: draft.defectReason.trim(),
+    unitPrice,
+    total: quantity * unitPrice,
+    supplierId: supplier.id,
+    supplier: supplier.name,
+    receiptId,
+    receivedQuantity: Math.max(0, Number(draft.receivedQuantity) || 0),
+    measurementType: draft.measurementType || "count",
+    measurementUnit: draft.measurementUnit || "dona",
+    date,
+  };
+};
 
 const capitalizeStart = (value = "") => value ? value[0].toLocaleUpperCase("uz-UZ") + value.slice(1) : "";
+const fillFromSavedProduct = (current, product) => ({
+  ...current,
+  productName: capitalizeStart(product.name || ""),
+  description: product.description || "",
+  brand: capitalizeStart(product.brand || ""),
+  sku: String(product.sku || "").toLocaleUpperCase("uz-UZ"),
+  category: capitalizeStart(product.category || ""),
+  packaging: capitalizeStart(product.packaging || ""),
+  cost: String(product.cost ?? ""),
+  price: String(product.price ?? ""),
+  measurementType: product.measurementType || "count",
+  measurementUnit: product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"),
+  extraMeasurement: product.extraMeasurement || "",
+  extraMeasurementValue: String(product.extraMeasurementValue || ""),
+  unitsPerPackage: String(product.unitsPerPackage || ""),
+  liters: String(product.liters || ""),
+  weight: String(product.weight || ""),
+  volume: String(product.volume || ""),
+  length: String(product.length || ""),
+  width: String(product.width || ""),
+  height: String(product.height || ""),
+  defectiveQuantity: "",
+  defectStatus: "",
+  defectReason: "",
+  defectUnitPrice: "",
+  existingId: product.id,
+});
 
-function LearnedInput({ value, options, onChange, disabled = false }) {
-  const [open, setOpen] = useState(false);
-  const matches = options.filter((item) => item.toLocaleLowerCase("uz-UZ").startsWith(value.toLocaleLowerCase("uz-UZ")));
-  return <div className="supplier-learned-input" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}><input className="input-base" value={value} disabled={disabled} onFocus={() => !disabled && setOpen(true)} onClick={() => !disabled && setOpen(true)} onChange={(event) => { onChange(capitalizeStart(event.target.value)); setOpen(true); }} placeholder={tx("Yozing yoki tanlang")} autoComplete="off" />{!disabled && open && matches.length > 0 && <div className="supplier-learned-options">{matches.map((item) => <button type="button" key={item} onClick={() => { onChange(item); setOpen(false); }}>{item}</button>)}</div>}</div>;
+function ShipmentFields({ value, onChange, skipped, onEdit }) {
+  if (skipped) return (
+    <div className="supplier-shipment-skipped">
+      <span>{tx("Yuk ma'lumotlari o'tkazib yuborildi")}</span>
+      <button type="button" className="btn-ghost" onClick={onEdit}>{tx("Ma'lumot kiritish")}</button>
+    </div>
+  );
+  const update = (key, next) => onChange((current) => ({ ...current, [key]: next }));
+  return (
+    <div className="supplier-shipment-card">
+      <div className="supplier-shipment-title">{tx("Yuk ma'lumotlari (ixtiyoriy)")}</div>
+      <div className="supplier-shipment-fields">
+        <Field label={tx("Ferma / ta'minotchi nomi")}><input className="input-base" value={value.farmName} onChange={(event) => update("farmName", event.target.value)} placeholder={tx("Masalan: Samarqand fermasi")} /></Field>
+        <Field label={tx("Reys raqami")}><input className="input-base" value={value.tripNumber} onChange={(event) => update("tripNumber", event.target.value)} placeholder={tx("Masalan: 12-reys")} /></Field>
+      </div>
+    </div>
+  );
 }
 
-function ReceiptProductFields({ value, onChange, packagingOptions, extraMeasurementOptions, suggestions = [], onChooseProduct, disabled = false }) {
+function MeasurementUnitInput({ value, disabled, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapperRef = useRef(null);
+  const filteredUnits = measurementUnits.filter((unit) =>
+    unit.toLocaleLowerCase("uz-UZ").includes(query.trim().toLocaleLowerCase("uz-UZ"))
+  );
+  const setUnit = (unit) => {
+    const isWeight = ["kilogramm", "kg", "gramm", "g", "milligramm", "mg"].includes(normalizedUnit(unit));
+    onChange((current) => ({
+      ...current,
+      measurementUnit: unit,
+      measurementType: isWeight ? "weight" : "count",
+      extraMeasurementValue: isMeterUnit(unit) ? current.extraMeasurementValue : "",
+    }));
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <div
+      className={`supplier-unit-input${open ? " is-open" : ""}`}
+      ref={wrapperRef}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <input
+        className="input-base"
+        value={value || "dona"}
+        disabled={disabled}
+        onFocus={() => { setQuery(""); setOpen(true); }}
+        onChange={(event) => {
+          const unit = event.target.value;
+          setQuery(unit);
+          setOpen(true);
+          const isWeight = ["kilogramm", "kg", "gramm", "g", "milligramm", "mg"].includes(normalizedUnit(unit));
+          onChange((current) => ({
+            ...current,
+            measurementUnit: unit,
+            measurementType: isWeight ? "weight" : "count",
+            extraMeasurementValue: isMeterUnit(unit) ? current.extraMeasurementValue : "",
+          }));
+        }}
+        placeholder={tx("Birlikni tanlang yoki yozing")}
+        autoComplete="off"
+        aria-label={tx("O'lchov birligi *")}
+        role="combobox"
+        aria-controls="supplier-measurement-unit-options"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        required
+      />
+      {!disabled && <button
+        type="button"
+        className="supplier-unit-toggle"
+        aria-label={tx("O'lchov birliklarini ko'rsatish")}
+        aria-expanded={open}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => { setQuery(""); setOpen((current) => !current); }}
+      ><ChevronDown size={16} /></button>}
+      {!disabled && open && <div id="supplier-measurement-unit-options" className="supplier-learned-options supplier-unit-options" role="listbox" aria-label={tx("O'lchov birliklari")}>
+        {filteredUnits.length ? filteredUnits.map((unit) => <button
+          type="button"
+          role="option"
+          aria-selected={normalizedUnit(unit) === normalizedUnit(value)}
+          key={unit}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setUnit(unit)}
+        >{unit}</button>) : <div className="supplier-unit-empty">{tx("Yangi birlik sifatida yoziladi")}</div>}
+      </div>}
+    </div>
+  );
+}
+
+function ReceiptProductFields({ value, onChange, suggestions = [], onChooseProduct, disabled = false }) {
   const update = (key, nextValue) => onChange((current) => ({ ...current, [key]: nextValue }));
   const changeName = (rawValue) => onChange((current) => current.existingId
     ? { ...current, ...emptyProduct, supplierId: current.supplierId, productName: capitalizeStart(rawValue), existingId: null }
     : { ...current, productName: capitalizeStart(rawValue) });
+  const nameMatches = value.productName.trim()
+    ? suggestions.filter((product) => String(product.name || "").toLocaleLowerCase("uz-UZ").startsWith(value.productName.trim().toLocaleLowerCase("uz-UZ"))).slice(0, 6)
+    : [];
+  const skuMatches = value.sku.trim()
+    ? suggestions.filter((product) => [product.sku, product.id].some((code) => String(code || "").toLocaleLowerCase("uz-UZ").startsWith(value.sku.trim().toLocaleLowerCase("uz-UZ")))).slice(0, 6)
+    : [];
   const currencyField = (key, label, required = false) => (
     <Field label={tx(label)}>
       <div className="supplier-money-input">
         <input
           className="input-base"
-          inputMode="decimal"
+          inputMode="numeric"
           aria-label={tx(label)}
           value={value[key] === "" ? "" : moneyInputValue(value[key])}
-          onChange={(event) => update(key, event.target.value === "" ? "" : String(toBaseMoney(event.target.value)))}
+          onChange={(event) => {
+            const digits = event.target.value.replace(/\D/g, "");
+            update(key, digits ? String(toBaseMoney(digits)) : "");
+          }}
           placeholder="0"
           required={required}
           disabled={disabled}
@@ -92,33 +258,55 @@ function ReceiptProductFields({ value, onChange, packagingOptions, extraMeasurem
       <Field label={tx("Tovar nomi *")}>
         <div className="supplier-product-name-input">
           <input className="input-base" value={value.productName} onChange={(event) => changeName(event.target.value)} placeholder={tx("Masalan: Kir yuvish kukuni")} autoComplete="off" required disabled={disabled} />
-          {!disabled && suggestions.length > 0 && <div className="supplier-learned-options">{suggestions.map((product) => <button type="button" key={product.id} onMouseDown={(event) => event.preventDefault()} onClick={() => onChooseProduct?.(product)}>{product.name}{product.brand ? ` · ${product.brand}` : ""}</button>)}</div>}
+          {!disabled && nameMatches.length > 0 && <div className="supplier-learned-options">{nameMatches.map((product) => <button type="button" key={product.id} onMouseDown={(event) => event.preventDefault()} onClick={() => onChooseProduct?.(product)}>{product.name}{product.brand ? ` · ${product.brand}` : ""}</button>)}</div>}
         </div>
       </Field>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <Field label={tx("Tovar uchun izoh (ixtiyoriy)")}>
+          <textarea className="input-base" value={value.description || ""} disabled={disabled} onChange={(event) => update("description", capitalizeStart(event.target.value))} placeholder={tx("Mahsulot haqida qo'shimcha ma'lumot...")} rows={3} maxLength={1000} style={{ width: "100%", minHeight: 84, resize: "vertical", padding: 12 }} />
+        </Field>
+      </div>
       <Field label={tx("Brend")}><input className="input-base" value={value.brand} disabled={disabled} onChange={(event) => update("brand", capitalizeStart(event.target.value))} placeholder={tx("Ixtiyoriy")} /></Field>
-      <Field label={tx("SKU kodi")}><input className="input-base" value={value.sku} disabled={disabled} onChange={(event) => update("sku", event.target.value)} placeholder={tx("Ixtiyoriy")} /></Field>
-      <Field label={tx("Kategoriya")}><input className="input-base" value={value.category} disabled={disabled} onChange={(event) => update("category", capitalizeStart(event.target.value))} placeholder={tx("Masalan: Maishiy kimyo")} /></Field>
-      <Field label={tx("O'lchov birligi *")}>
-        <select className="input-base" value={value.measurementType || "count"} disabled={disabled} onChange={(event) => update("measurementType", event.target.value)}>
-          <option value="count">{tx("Soni (dona)")}</option>
-          <option value="weight">{tx("Og'irligi (kg)")}</option>
-        </select>
+      <Field label={tx("ID raqami")}>
+        <div className="supplier-product-name-input">
+          <input className="input-base" value={value.sku} disabled={disabled} onChange={(event) => {
+            const sku = event.target.value.toLocaleUpperCase("uz-UZ");
+          if (!sku && value.existingId) onChange((current) => ({ ...current, ...emptyProduct, supplierId: current.supplierId, sku: "", existingId: null }));
+            else update("sku", sku);
+          }} placeholder={tx("Ixtiyoriy")} autoComplete="off" />
+          {!disabled && skuMatches.length > 0 && <div className="supplier-learned-options">{skuMatches.map((product) => <button type="button" key={product.id} onMouseDown={(event) => event.preventDefault()} onClick={() => onChooseProduct?.(product)}>{product.sku || product.id} · {product.name}{product.brand ? ` · ${product.brand}` : ""}</button>)}</div>}
+        </div>
       </Field>
-      <Field label={tx("Qadoq turi")}><LearnedInput value={value.packaging} options={packagingOptions} disabled={disabled} onChange={(nextValue) => update("packaging", nextValue)} /></Field>
-      <Field label={tx("Qo'shimcha o'lchov")}><LearnedInput value={value.extraMeasurement} options={extraMeasurementOptions} disabled={disabled} onChange={(nextValue) => onChange((current) => ({ ...current, extraMeasurement: nextValue, extraMeasurementValue: "" }))} /></Field>
-      {value.extraMeasurement && <Field label={value.extraMeasurement}><input className="input-base" type="number" min="0" step="any" disabled={disabled} value={value.extraMeasurementValue} onChange={(event) => update("extraMeasurementValue", event.target.value)} placeholder="0" /></Field>}
-      <Field label={tx("Qabul qilingan miqdor *")}><input className="input-base" type="number" min={value.measurementType === "weight" ? "0.001" : "1"} step={value.measurementType === "weight" ? "any" : "1"} value={value.receivedQuantity} disabled={disabled} onChange={(event) => update("receivedQuantity", event.target.value)} placeholder={tx(value.measurementType === "weight" ? "Masalan: 2.5" : "Masalan: 20")} required /></Field>
+      <Field label={tx("Kategoriya")}><input className="input-base" value={value.category} disabled={disabled} onChange={(event) => update("category", capitalizeStart(event.target.value))} placeholder={tx("Masalan: Maishiy kimyo")} /></Field>
+      <div className="supplier-measurement-row">
+        <Field label={tx("O'lchov birligi *")}>
+          <MeasurementUnitInput value={value.measurementUnit || "dona"} disabled={disabled} onChange={onChange} />
+        </Field>
+        {isMeterUnit(value.measurementUnit) && <Field label={tx("Uzunligi (metr)")}><input className="input-base" type="text" inputMode="decimal" value={value.extraMeasurementValue || ""} disabled={disabled} onChange={(event) => update("extraMeasurementValue", quantityInputValue(event.target.value, true))} placeholder={tx("Masalan: 1.5")} /></Field>}
+      </div>
+      <Field label={tx("Qabul qilingan miqdor *")}><input className="input-base" type="text" inputMode={allowsDecimalUnit(value.measurementUnit) ? "decimal" : "numeric"} value={value.receivedQuantity} disabled={disabled} onChange={(event) => update("receivedQuantity", quantityInputValue(event.target.value, allowsDecimalUnit(value.measurementUnit)))} placeholder={tx(allowsDecimalUnit(value.measurementUnit) ? "Masalan: 2.5" : "Masalan: 20")} required /></Field>
       {currencyField("cost", "Tan narxi *", true)}
       {currencyField("price", "Sotuv narxi (ixtiyoriy)")}
+      <Field label={tx("Brak miqdori")}><input className="input-base" type="text" inputMode={allowsDecimalUnit(value.measurementUnit) ? "decimal" : "numeric"} value={value.defectiveQuantity || ""} disabled={disabled} onChange={(event) => update("defectiveQuantity", quantityInputValue(event.target.value, allowsDecimalUnit(value.measurementUnit)))} placeholder="0" autoComplete="off" /></Field>
+      {Number(value.defectiveQuantity) > 0 && <>
+        <Field label={tx("Brak sababi *")}><input className="input-base" value={value.defectReason} disabled={disabled} onChange={(event) => update("defectReason", capitalizeStart(event.target.value))} placeholder={tx("Masalan: ekrani singan")} required /></Field>
+        {currencyField("defectUnitPrice", `Brak narxi (1 ${unitLabel(value)}) *`, true)}
+        <div className="supplier-form-help" style={{ gridColumn: "1 / -1", marginTop: -8 }}>
+          {tx("Brak summasi")}: {moneyText((Number(value.defectiveQuantity) || 0) * moneyValue(value.defectUnitPrice))}
+        </div>
+      </>}
     </div>
   );
 }
 
-export default function Suppliers({ onNavigate }) {
+export default function Suppliers({ onNavigate, section = "suppliers" }) {
   useUILanguage();
+  const activeSection = section;
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [returnPickerOpen, setReturnPickerOpen] = useState(false);
+  const [returnSupplierQuery, setReturnSupplierQuery] = useState('');
   const [suppliers, setSuppliers] = useState(() => {
     try {
       const saved = getSuppliers(null);
@@ -128,13 +316,21 @@ export default function Suppliers({ onNavigate }) {
   // Boshqa kassir yoki kompyuterda o'zgarsa, Supabase'dan kelgan yangi holat qayta o'qiladi.
   const dataVersion = useDataVersion();
   useEffect(() => { if (dataVersion) setSuppliers(getSuppliers()); }, [dataVersion]);
+  const supplierReturns = useData("crm_supplier_returns", []);
+  const returnedRecords = Array.isArray(supplierReturns) ? supplierReturns : [];
   const [open, setOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
+  const [shipmentStepOpen, setShipmentStepOpen] = useState(false);
+  const [shipmentStepTarget, setShipmentStepTarget] = useState(null);
   const [pendingProducts, setPendingProducts] = useState([]);
+  const [receiptSupplierGroups, setReceiptSupplierGroups] = useState([]);
+  const [activeReceiptSupplierKey, setActiveReceiptSupplierKey] = useState("");
 
   const [form, setForm] = useState({
     name: "",
     phone: "",
+    address: "",
+    existingSupplierId: "",
     ...emptyProduct,
     status: "active",
   });
@@ -145,34 +341,94 @@ export default function Suppliers({ onNavigate }) {
   const [productQueue, setProductQueue] = useState([]);
   const [supplierDebtInput, setSupplierDebtInput] = useState("");
   const [newSupplierDebtInput, setNewSupplierDebtInput] = useState("");
+  const [shipmentInfo, setShipmentInfo] = useState(emptyShipmentInfo);
+  const [shipmentInfoSkipped, setShipmentInfoSkipped] = useState(false);
   const [receiptConfirmation, setReceiptConfirmation] = useState(false);
+  const [newSupplierConfirmation, setNewSupplierConfirmation] = useState(false);
   const [receiptAnimation, setReceiptAnimation] = useState(null);
   const receiptTimer = useRef(null);
   useEffect(() => () => clearTimeout(receiptTimer.current), []);
   const knownProducts = readList("crm_products");
-  const packagingOptions = [...new Set(knownProducts.map((item) => item.packaging).filter(Boolean))].sort();
-  const extraMeasurementOptions = [...new Set(knownProducts.map((item) => item.extraMeasurement).filter(Boolean))].sort();
-  const productSuggestions = productForm.productName.trim() && !productForm.existingId
-    ? knownProducts.filter((item) => productForm.supplierId && String(item.supplierId) === String(productForm.supplierId)).filter((item) => String(item.name || "").toLocaleLowerCase("uz-UZ").startsWith(productForm.productName.toLocaleLowerCase("uz-UZ"))).filter((item, index, list) => list.findIndex((match) => String(match.name || "").toLocaleLowerCase("uz-UZ") === String(item.name || "").toLocaleLowerCase("uz-UZ")) === index).slice(0, 6)
+  const productSuggestions = productForm.supplierId
+    ? knownProducts.filter((item) => String(item.supplierId) === String(productForm.supplierId)).filter((item, index, list) => list.findIndex((match) => String(match.id) === String(item.id)) === index)
     : [];
-  const chooseProduct = (product) => setProductForm((current) => ({ ...current, productName: product.name, brand: product.brand || "", category: product.category || "", packaging: product.packaging || "", sku: product.sku || "", cost: String(product.cost ?? ""), price: String(product.price ?? ""), measurementType: product.measurementType || "count", extraMeasurement: product.extraMeasurement || "", extraMeasurementValue: String(product.extraMeasurementValue || ""), existingId: product.id }));
+  const newSupplierProductSuggestions = knownProducts;
+  const chooseProduct = (product) => setProductForm((current) => fillFromSavedProduct(current, product));
+  const chooseNewSupplierProduct = (product) => setForm((current) => fillFromSavedProduct(current, product));
   const updateProductForm = (updater) => { setProductForm(updater); setProductErr(""); };
   const updateNewSupplierForm = (updater) => { setForm(updater); setErr(""); };
+  useEffect(() => {
+    if (!activeReceiptSupplierKey) return;
+    setReceiptSupplierGroups((groups) => groups.map((group) => group.key === activeReceiptSupplierKey
+      ? { ...group, name: form.name, phone: form.phone, address: form.address, existingSupplierId: form.existingSupplierId }
+      : group));
+  }, [activeReceiptSupplierKey, form.name, form.phone, form.address, form.existingSupplierId]);
+  const chooseSavedSupplierByName = (name) => {
+    const normalizedName = String(name || "").trim().toLocaleLowerCase("uz-UZ");
+    return suppliers.find((supplier) => String(supplier.name || "").trim().toLocaleLowerCase("uz-UZ") === normalizedName) || null;
+  };
+  const updateNewSupplierName = (name) => {
+    const formattedName = capitalizeStart(name);
+    const savedSupplier = chooseSavedSupplierByName(formattedName);
+    setForm((current) => ({
+      ...current,
+      name: formattedName,
+      existingSupplierId: savedSupplier ? String(savedSupplier.id) : "",
+      phone: savedSupplier ? savedSupplier.phone || "" : current.existingSupplierId ? "" : current.phone,
+      address: savedSupplier ? savedSupplier.address || "" : current.existingSupplierId ? "" : current.address,
+    }));
+    setErr("");
+  };
+  const selectSavedSupplier = (supplierId) => {
+    const supplier = suppliers.find((item) => String(item.id) === String(supplierId));
+    setForm((current) => ({
+      ...current,
+      existingSupplierId: supplier ? String(supplier.id) : "",
+      name: supplier ? capitalizeStart(supplier.name || "") : current.existingSupplierId ? "" : current.name,
+      phone: supplier?.phone || (current.existingSupplierId ? "" : current.phone),
+      address: supplier?.address || (current.existingSupplierId ? "" : current.address),
+    }));
+    setErr("");
+  };
+  const selectedSavedSupplier = suppliers.find((supplier) => String(supplier.id) === String(form.existingSupplierId)) || null;
+  const resetReceiptSupplierGroups = () => {
+    const initial = createReceiptSupplierGroup();
+    setReceiptSupplierGroups([initial]);
+    setActiveReceiptSupplierKey(initial.key);
+  };
+  const resetShipmentInfo = () => { setShipmentInfo(emptyShipmentInfo); setShipmentInfoSkipped(false); };
+  const startShipmentFlow = (target) => {
+    resetShipmentInfo();
+    setShipmentStepTarget(target);
+    setShipmentStepOpen(true);
+  };
+  const continueShipmentFlow = (skipped = false) => {
+    if (skipped) {
+      setShipmentInfo(emptyShipmentInfo);
+      setShipmentInfoSkipped(true);
+    }
+    const target = shipmentStepTarget;
+    setShipmentStepOpen(false);
+    setShipmentStepTarget(null);
+    if (target === "supplier") setOpen(true);
+    if (target === "products") setProductOpen(true);
+  };
+  const skipShipmentInfo = () => continueShipmentFlow(true);
   const receiptDrafts = [...productQueue, ...(productForm.productName.trim() ? [productForm] : [])];
   const receiptTotal = receiptDrafts.reduce((sum, item) => sum + Math.max(0, Number(item.receivedQuantity) || 0) * Number(item.cost || 0), 0);
+  const receiptDefectQuantity = receiptDrafts.reduce((sum, item) => sum + Math.max(0, Number(item.defectiveQuantity) || 0), 0);
+  const receiptDefectTotal = receiptDrafts.reduce((sum, item) => sum + defectTotalOf(item), 0);
+  const supplierDebtLimit = receiptDrafts.filter((item) => item.supplierId && String(item.supplierId) !== "street").reduce((sum, item) => sum + Math.max(0, Number(item.receivedQuantity) || 0) * Number(item.cost || 0), 0);
   const receiptDebt = Math.min(receiptTotal, moneyValue(supplierDebtInput));
   const receiptCash = Math.max(0, receiptTotal - receiptDebt);
-  const newSupplierDrafts = [...pendingProducts, ...(form.productName.trim() ? [pickProduct(form)] : [])];
+  const newSupplierDrafts = [...pendingProducts, ...(form.productName.trim() ? [{ ...pickProduct(form), supplierGroupKey: activeReceiptSupplierKey, supplierId: form.existingSupplierId || activeReceiptSupplierKey }] : [])];
   const newSupplierTotal = newSupplierDrafts.reduce((sum, item) => sum + Math.max(0, Number(item.receivedQuantity) || 0) * moneyValue(item.cost), 0);
   const newSupplierDebt = Math.min(newSupplierTotal, moneyValue(newSupplierDebtInput));
   const newSupplierCash = Math.max(0, newSupplierTotal - newSupplierDebt);
   useEffect(() => { setNewSupplierDebtInput((value) => String(Math.min(newSupplierTotal, moneyValue(value)))); }, [newSupplierTotal]);
-  useEffect(() => { setSupplierDebtInput((value) => value === "" ? "" : String(Math.min(receiptTotal, moneyValue(value)))); }, [receiptTotal]);
+  useEffect(() => { setSupplierDebtInput((value) => value === "" ? "" : String(Math.min(supplierDebtLimit, moneyValue(value)))); }, [supplierDebtLimit]);
 
   const toast = useToast();
-
-  const digits = form.phone.replace(/\D/g, "");
-  const phoneValid = digits.length === 12;
 
   const productError = (product) => {
     const quantity = Number(product.receivedQuantity);
@@ -180,24 +436,32 @@ export default function Suppliers({ onNavigate }) {
     if (!product.productName.trim() || product.receivedQuantity === "" || product.cost === "") {
       return "Tovar nomi, qabul qilingan miqdor va tan narxini kiriting";
     }
-    if (!Number.isFinite(quantity) || quantity <= 0 || (product.measurementType !== "weight" && !Number.isInteger(quantity)) || !Number.isFinite(cost) || cost < 0) {
+    if (!Number.isFinite(quantity) || quantity <= 0 || (!allowsDecimalUnit(product.measurementUnit) && !Number.isInteger(quantity)) || !Number.isFinite(cost) || cost < 0) {
       return "Miqdor va tan narxini to'g'ri kiriting";
+    }
+    const defectQuantity = Number(product.defectiveQuantity || 0);
+    if (!Number.isFinite(defectQuantity) || defectQuantity < 0 || defectQuantity > quantity || (!allowsDecimalUnit(product.measurementUnit) && !Number.isInteger(defectQuantity))) {
+      return "Brak miqdori qabul qilingan miqdordan oshmasin va to'g'ri kiritilsin";
+    }
+    if (defectQuantity > 0 && (!product.defectReason?.trim() || product.defectUnitPrice === "" || !Number.isFinite(Number(product.defectUnitPrice)) || Number(product.defectUnitPrice) < 0)) {
+      return "Brak sababi va narxini kiriting";
     }
     return "";
   };
 
   const addPendingProduct = () => {
-    const product = pickProduct(form);
+    const product = { ...pickProduct(form), supplierGroupKey: activeReceiptSupplierKey, supplierId: form.existingSupplierId || activeReceiptSupplierKey };
     const error = productError(product);
-    if (error) return setErr(error);
-    if (hasDuplicateProducts([...pendingProducts, product])) return setErr("Bu mahsulot ro'yxatga allaqachon qo'shilgan.");
+    if (error) { setErr(error); return false; }
+    if (hasDuplicateProducts([...pendingProducts, product])) { setErr("Bu mahsulot ushbu ta'minotchi ro'yxatida allaqachon qo'shilgan."); return false; }
     setPendingProducts((items) => [...items, { ...product, key: `${Date.now()}-${items.length}` }]);
-    setForm((current) => ({ ...current, ...emptyProduct }));
+    setForm((current) => ({ ...current, ...emptyProduct, existingId: null }));
     setErr("");
+    return true;
   };
 
   const queueProduct = () => {
-    if (!productForm.supplierId) return setProductErr("Ta'minotchini tanlang");
+    if (!productForm.supplierId) return setProductErr("Ta'minotchini tanlang yoki 'Ko'chadan' variantini tanlang");
     const error = productError(productForm); if (error) return setProductErr(error);
     if (hasDuplicateProducts([...productQueue, productForm])) return setProductErr("Bu mahsulot qabul ro'yxatiga allaqachon qo'shilgan.");
     setProductQueue((items) => [...items, { ...pickProduct(productForm), key: `${Date.now()}-${items.length}` }]);
@@ -206,46 +470,76 @@ export default function Suppliers({ onNavigate }) {
   };
 
   const addProductToSupplier = () => {
-    const supplier = suppliers.find((item) => String(item.id) === String(productForm.supplierId));
-    if (!supplier) return setProductErr("Ta'minotchini tanlang");
     const drafts = [...productQueue, ...(productForm.productName.trim() ? [pickProduct(productForm)] : [])];
     if (!drafts.length) return setProductErr("Kamida bitta mahsulot nomini kiriting");
+    if (drafts.some((draft) => draft.supplierId !== "street" && !suppliers.some((supplier) => String(supplier.id) === String(draft.supplierId)))) return setProductErr("Har bir mahsulot uchun ta'minotchini tanlang yoki 'Ko'chadan' variantini tanlang");
     if (hasDuplicateProducts(drafts)) return setProductErr("Bir xil mahsulot qabul ro'yxatida takrorlangan. Takrorlangan qatorni o'chiring.");
 
     const invalid = drafts.map(productError).find(Boolean); if (invalid) return setProductErr(invalid);
     if (!receiptConfirmation) { setReceiptConfirmation(new Date().toISOString()); return; }
     const createdAt = receiptConfirmation, savedProducts = readList("crm_products");
+    const receiptId = `REC-${Date.now()}`;
     const productsToSave = drafts.map((draft, index) => {
+      const supplier = suppliers.find((item) => String(item.id) === String(draft.supplierId)) || { id: null, name: "Ko'chadan" };
       const quantity = Math.max(0, Number(draft.receivedQuantity) || 0);
+      const defectiveQuantity = defectQuantityOf(draft);
       const existing = savedProducts.find((item) => String(item.supplierId) === String(supplier.id) && (draft.existingId ? String(item.id) === String(draft.existingId) : String(item.name || "").trim().toLowerCase() === draft.productName.trim().toLowerCase()));
       if (existing) {
         const nextStock = Number(existing.stock || 0) + quantity;
-        return { ...existing, measurementType: draft.measurementType || existing.measurementType || "count", extraMeasurement: draft.extraMeasurement, extraMeasurementValue: Number(draft.extraMeasurementValue) || 0, stock: nextStock, status: nextStock === 0 ? "out" : nextStock < 10 ? "low" : "active", brand: capitalizeStart(draft.brand.trim()) || existing.brand, sku: capitalizeStart(draft.sku.trim()) || existing.sku, category: capitalizeStart(draft.category.trim()) || existing.category, packaging: capitalizeStart(draft.packaging.trim()) || existing.packaging, cost: draft.cost === "" ? existing.cost : Number(draft.cost), price: draft.price === "" ? existing.price : Number(draft.price) };
+        const nextDefectiveStock = Number(existing.defectiveStock || 0) + defectiveQuantity;
+        const defect = createDefectEntry(draft, existing.id, supplier, receiptId, createdAt);
+        const nextDefects = defect ? [...(Array.isArray(existing.defects) ? existing.defects : []), defect] : (existing.defects || []);
+        const sellableStock = Math.max(0, nextStock - nextDefectiveStock);
+        return { ...existing, measurementType: draft.measurementType || existing.measurementType || "count", measurementUnit: draft.measurementUnit || existing.measurementUnit || "dona", extraMeasurement: isMeterUnit(draft.measurementUnit) ? tx("Uzunligi (metr)") : draft.extraMeasurement, extraMeasurementValue: Number(draft.extraMeasurementValue) || 0, description: draft.description.trim() || existing.description || "", stock: nextStock, defectiveStock: nextDefectiveStock, defects: nextDefects, status: sellableStock === 0 ? "out" : sellableStock < 10 ? "low" : "active", brand: capitalizeStart(draft.brand.trim()) || existing.brand, sku: capitalizeStart(draft.sku.trim()) || existing.sku, category: capitalizeStart(draft.category.trim()) || existing.category, packaging: capitalizeStart(draft.packaging.trim()) || existing.packaging, cost: draft.cost === "" ? existing.cost : Number(draft.cost), price: draft.price === "" ? existing.price : Number(draft.price) };
       }
+      const id = `${Date.now()}-manual-${index}`;
+      const defect = createDefectEntry(draft, id, supplier, receiptId, createdAt);
+      const sellableStock = Math.max(0, quantity - defectiveQuantity);
       return {
-        id: `${Date.now()}-manual-${index}`, name: capitalizeStart(draft.productName.trim()),
-        brand: draft.brand.trim(), sku: draft.sku.trim() || `SKU-${Date.now().toString().slice(-6)}-${index + 1}`,
-        category: draft.category.trim() || "Boshqa", packaging: capitalizeStart(draft.packaging.trim()),
-        price: Number(draft.price) || 0, cost: Number(draft.cost) || 0, stock: quantity, measurementType: draft.measurementType || "count",
-        status: quantity > 0 && quantity < 10 ? "low" : "active", supplierId: supplier.id,
-        supplierName: supplier.name, extraMeasurement: draft.extraMeasurement, extraMeasurementValue: Number(draft.extraMeasurementValue) || 0, unitsPerPackage: Number(draft.unitsPerPackage) || 0,
+        id, name: capitalizeStart(draft.productName.trim()),
+        description: draft.description.trim(), brand: draft.brand.trim(), sku: draft.sku.trim() || `SKU-${Date.now().toString().slice(-6)}-${index + 1}`,
+        category: draft.category.trim() || "Boshqa", packaging: capitalizeStart(draft.packaging.trim()), defectiveStock: defectiveQuantity, defects: defect ? [defect] : [],
+        price: Number(draft.price) || 0, cost: Number(draft.cost) || 0, stock: quantity, measurementType: draft.measurementType || "count", measurementUnit: draft.measurementUnit || "dona",
+        status: sellableStock === 0 ? "out" : sellableStock < 10 ? "low" : "active", supplierId: supplier.id,
+        supplierName: supplier.name, extraMeasurement: isMeterUnit(draft.measurementUnit) ? tx("Uzunligi (metr)") : draft.extraMeasurement, extraMeasurementValue: Number(draft.extraMeasurementValue) || 0, unitsPerPackage: Number(draft.unitsPerPackage) || 0,
         liters: Number(draft.liters) || 0, weight: Number(draft.weight) || 0,
         volume: Number(draft.volume) || 0, length: Number(draft.length) || 0,
         width: Number(draft.width) || 0, height: Number(draft.height) || 0, createdAt,
       };
     });
-    const receiptLines = drafts.map((draft, index) => ({ id: productsToSave[index].id, name: productsToSave[index].name, quantity: Math.max(0, Number(draft.receivedQuantity) || 0), measurementType: draft.measurementType || "count", packaging: draft.packaging || "", cost: Number(draft.cost) }));
-    const totalAmount = receiptLines.reduce((sum, item) => sum + item.quantity * item.cost, 0), debtAmount = Math.min(totalAmount, moneyValue(supplierDebtInput)), cashAmount = Math.max(0, totalAmount - debtAmount);
-    const order = { id: `PO-${Date.now().toString().slice(-6)}`, supplierId: supplier.id, items: receiptLines.reduce((sum, item) => sum + item.quantity, 0), productCount: receiptLines.length, productNames: receiptLines.map((item) => item.name), productIds: receiptLines.map((item) => item.id), productDetails: receiptLines, amount: totalAmount, remaining: debtAmount, payment: cashAmount === totalAmount ? "Naqd" : cashAmount ? "Qisman" : "Qarz", status: debtAmount === 0 ? "paid" : cashAmount ? "partial" : "debt", paymentHistory: cashAmount > 0 ? [{ id: `PAY-INITIAL-${Date.now()}`, amount: cashAmount, method: "Naqd", date: createdAt, kind: "initial" }] : [], received: true, date: createdAt };
-    const receipt = { id: `REC-${Date.now()}`, supplierId: supplier.id, supplier: supplier.name, orderId: order.id, items: order.items, products: order.productDetails, amount: order.amount, date: createdAt };
-    const updated = suppliers.map((item) => item.id === supplier.id ? {
-      ...item, products: (Number(item.products) || 0) + productsToSave.filter((product) => !savedProducts.some((saved) => String(saved.id) === String(product.id))).length,
-      purchases: (Number(item.purchases) || 0) + order.amount, debt: (Number(item.debt) || 0) + debtAmount, lastOrder: createdAt,
-    } : item);
+    const receiptLines = drafts.map((draft, index) => {
+      const supplier = suppliers.find((item) => String(item.id) === String(draft.supplierId)) || { id: null, name: "Ko'chadan" };
+      return { id: productsToSave[index].id, name: productsToSave[index].name, description: draft.description.trim(), supplierId: supplier.id, supplierName: supplier.name, quantity: Math.max(0, Number(draft.receivedQuantity) || 0), defectiveQuantity: defectQuantityOf(draft), defectStatus: defectQuantityOf(draft) > 0 ? "Brak" : "", defectReason: draft.defectReason || "", defectUnitPrice: moneyValue(draft.defectUnitPrice), defects: [createDefectEntry(draft, productsToSave[index].id, supplier, receiptId, createdAt)].filter(Boolean), measurementType: draft.measurementType || "count", measurementUnit: draft.measurementUnit || "dona", extraMeasurement: isMeterUnit(draft.measurementUnit) ? tx("Uzunligi (metr)") : draft.extraMeasurement || "", extraMeasurementValue: Number(draft.extraMeasurementValue) || 0, packaging: draft.packaging || "", cost: Number(draft.cost) };
+    });
+    const totalAmount = receiptLines.reduce((sum, item) => sum + item.quantity * item.cost, 0);
+    const supplierOrderAmount = receiptLines.filter((line) => line.supplierId !== null).reduce((sum, line) => sum + line.quantity * line.cost, 0);
+    const debtAmount = Math.min(supplierOrderAmount, moneyValue(supplierDebtInput));
+    const groupedLines = new Map();
+    receiptLines.filter((line) => line.supplierId !== null).forEach((line) => groupedLines.set(String(line.supplierId), [...(groupedLines.get(String(line.supplierId)) || []), line]));
+    const supplierGroups = [...groupedLines.entries()];
+    let allocatedDebt = 0;
+    const orders = supplierGroups.map(([supplierKey, lines], index) => {
+      const supplier = suppliers.find((item) => String(item.id) === supplierKey);
+      const amount = lines.reduce((sum, line) => sum + line.quantity * line.cost, 0);
+      const remaining = index === supplierGroups.length - 1 ? debtAmount - allocatedDebt : supplierOrderAmount > 0 ? Math.min(debtAmount - allocatedDebt, Math.round(debtAmount * amount / supplierOrderAmount)) : 0;
+      allocatedDebt += remaining;
+      const paid = amount - remaining;
+      const order = { id: `${receiptId}-${supplier.id}`, receiptId, supplierId: supplier.id, supplierName: supplier.name, supplierAddress: supplier.address || "", items: lines.reduce((sum, line) => sum + line.quantity, 0), defectiveItems: lines.reduce((sum, line) => sum + line.defectiveQuantity, 0), productCount: lines.length, productNames: lines.map((line) => line.name), productIds: lines.map((line) => line.id), productDetails: lines, amount, remaining, payment: remaining === 0 ? "Naqd" : paid ? "Qisman" : "Qarz", status: remaining === 0 ? "paid" : paid ? "partial" : "debt", paymentHistory: paid > 0 ? [{ id: `PAY-INITIAL-${Date.now()}-${supplier.id}`, amount: paid, method: "Naqd", date: createdAt, kind: "initial" }] : [], received: true, date: createdAt, farmName: shipmentInfoSkipped ? "" : shipmentInfo.farmName.trim(), tripNumber: shipmentInfoSkipped ? "" : shipmentInfo.tripNumber.trim() };
+      return order;
+    });
+    const supplierIds = supplierGroups.map(([supplierId]) => suppliers.find((item) => String(item.id) === supplierId)?.id).filter((id) => id !== undefined);
+    const supplierNames = [...new Set(receiptLines.map((line) => line.supplierName).filter(Boolean))];
+    const receipt = { id: receiptId, supplierId: supplierIds.length === 1 ? supplierIds[0] : null, supplierIds, supplier: supplierNames.join(", "), supplierNames, supplierAddresses: orders.map((order) => ({ supplierId: order.supplierId, supplierName: order.supplierName, address: order.supplierAddress || "" })), orderId: orders.length === 1 ? orders[0].id : undefined, orderIds: orders.map((order) => order.id), items: receiptLines.reduce((sum, item) => sum + item.quantity, 0), defectiveItems: receiptLines.reduce((sum, item) => sum + item.defectiveQuantity, 0), products: receiptLines, amount: totalAmount, remaining: debtAmount, date: createdAt, farmName: shipmentInfoSkipped ? "" : shipmentInfo.farmName.trim(), tripNumber: shipmentInfoSkipped ? "" : shipmentInfo.tripNumber.trim() };
+    const updated = suppliers.map((item) => {
+      const order = orders.find((entry) => String(entry.supplierId) === String(item.id));
+      if (!order) return item;
+      const newProductCount = productsToSave.filter((product) => String(product.supplierId) === String(item.id) && !savedProducts.some((saved) => String(saved.id) === String(product.id))).length;
+      return { ...item, products: (Number(item.products) || 0) + newProductCount, purchases: (Number(item.purchases) || 0) + order.amount, debt: (Number(item.debt) || 0) + order.remaining, lastOrder: createdAt };
+    });
     try {
       saveProducts([...productsToSave.filter((product) => !savedProducts.some((saved) => String(saved.id) === String(product.id))), ...savedProducts.map((saved) => productsToSave.find((product) => String(product.id) === String(saved.id)) || saved)]);
       saveSuppliers(updated);
-      saveSupplierOrders(supplier.id, [order, ...readList(`crm_supplier_orders_${supplier.id}`)]);
+      orders.forEach((order) => saveSupplierOrders(order.supplierId, [order, ...readList(`crm_supplier_orders_${order.supplierId}`)]));
       saveSupplierReceipts([receipt, ...readList("crm_supplier_receipts")]);
     } catch { return setProductErr("Mahsulot saqlanmadi. Qayta urinib ko'ring."); }
     setSuppliers(updated);
@@ -255,122 +549,126 @@ export default function Suppliers({ onNavigate }) {
     setProductErr("");
     setProductOpen(false);
     setReceiptConfirmation(false);
+    resetShipmentInfo();
     setReceiptAnimation({ amount: totalAmount, remainingDebt: debtAmount });
     const sound = new Audio(checkSound); sound.play().catch(() => {});
     receiptTimer.current = setTimeout(() => setReceiptAnimation(null), 2400);
     window.dispatchEvent(new Event("crm-products-updated"));
-    toast.success && toast.success(`${productsToSave.length} ta mahsulot ta'minotchiga biriktirildi`);
+    toast.success && toast.success(`${productsToSave.length} ta mahsulot qabul qilindi`);
   };
 
   const submit = () => {
-    if (!form.name.trim()) {
-      return setErr("Ta'minotchi nomini kiriting");
+    const groups = receiptSupplierGroups.map((group) => {
+      const lines = pendingProducts.filter((item) => item.supplierGroupKey === group.key);
+      if (group.key === activeReceiptSupplierKey && form.productName.trim()) lines.push({ ...pickProduct(form), supplierGroupKey: group.key, supplierId: form.existingSupplierId || group.key });
+      return { ...group, lines };
+    }).filter((group) => group.lines.length);
+    if (!groups.length) return setErr("Kamida bitta ta'minotchi va tovar kiriting");
+    for (const group of groups) {
+      if (!group.name.trim()) return setErr("Har bir ta'minotchi nomini kiriting");
+      if (group.phone.replace(/\D/g, "").length !== 12) return setErr(`${group.name}: telefon raqamini to'liq kiriting`);
     }
-
-    if (!phoneValid) {
-      return setErr("Telefon raqamini to'liq kiriting");
-    }
-
-    const productDrafts = newSupplierDrafts;
-    if (!productDrafts.length) return setErr("Kamida bitta tovarni qabulga qo'shing");
-    if (hasDuplicateProducts(productDrafts)) return setErr("Bir xil mahsulot qabul ro'yxatida takrorlangan. Takrorlangan qatorni o'chiring.");
+    const supplierKeys = groups.map((group) => group.existingSupplierId
+      ? `saved:${group.existingSupplierId}`
+      : `new:${group.name.trim().toLocaleLowerCase("uz-UZ")}`);
+    if (new Set(supplierKeys).size !== supplierKeys.length) return setErr("Bir ta'minotchini bitta qabulga ikki marta qo'shib bo'lmaydi.");
+    const productDrafts = groups.flatMap((group) => group.lines.map((item) => ({ ...item, supplierGroupKey: group.key, supplierId: group.existingSupplierId || group.key })));
+    if (hasDuplicateProducts(productDrafts)) return setErr("Bir xil mahsulot bir ta'minotchi ro'yxatida takrorlangan. Takrorlangan qatorni o'chiring.");
     const invalid = productDrafts.map(productError).find(Boolean);
     if (invalid) return setErr(invalid);
 
     setErr("");
-
+    if (!newSupplierConfirmation) {
+      setNewSupplierConfirmation(true);
+      return;
+    }
     const prev = suppliers;
     const createdAt = new Date().toISOString();
-    const updated = [
-      {
-        id:
-          Math.max(
-            0,
-            ...prev.map((x) => Number(x.id) || 0)
-          ) + 1,
-
-        name: form.name.trim(),
-        phone: form.phone,
-        products: productDrafts.length,
-        purchases: productDrafts.reduce((sum, item) => sum + Number(item.receivedQuantity) * Number(item.cost), 0),
-        debt: newSupplierDebt,
-        lastOrder: createdAt,
-        createdAt,
-        status: "active",
-      },
-      ...prev,
-    ];
-    const supplierId = updated[0].id;
+    const receiptId = `REC-${Date.now()}`;
+    let nextId = Math.max(0, ...prev.map((item) => Number(item.id) || 0));
+    const resolvedGroups = groups.map((group) => {
+      const saved = prev.find((item) => String(item.id) === String(group.existingSupplierId));
+      const id = saved?.id ?? ++nextId;
+      return { ...group, supplierId: id, supplierName: group.name.trim(), supplierAddress: group.address.trim(), savedSupplier: saved || null };
+    });
+    const groupForDraft = (draft) => resolvedGroups.find((group) => group.key === draft.supplierGroupKey);
     const productsForReceipt = productDrafts.map((item, index) => {
+      const group = groupForDraft(item);
       const receivedQuantity = Number(item.receivedQuantity);
+      const defectiveQuantity = defectQuantityOf(item);
+      const id = `${Date.now()}-${index}`;
+      const defect = createDefectEntry(item, id, { id: group.supplierId, name: group.supplierName }, receiptId, createdAt);
+      const sellableStock = Math.max(0, receivedQuantity - defectiveQuantity);
       return {
-        id: `${Date.now()}-${index}`,
-        name: item.productName.trim(), brand: item.brand.trim(),
-        sku: item.sku.trim() || `SKU-${Date.now().toString().slice(-6)}-${index + 1}`,
-        category: item.category.trim() || "Boshqa",
-        price: Number(item.price) || 0, cost: Number(item.cost), stock: receivedQuantity, measurementType: item.measurementType || "count",
-        status: receivedQuantity < 10 ? "low" : "active", supplierId,
-        supplierName: form.name.trim(), packaging: item.packaging, extraMeasurement: item.extraMeasurement, extraMeasurementValue: Number(item.extraMeasurementValue) || 0,
-        unitsPerPackage: Number(item.unitsPerPackage) || 0, liters: Number(item.liters) || 0,
-        weight: Number(item.weight) || 0, volume: Number(item.volume) || 0,
+        id, name: item.productName.trim(), description: item.description.trim(), brand: item.brand.trim(),
+        sku: item.sku.trim() || `SKU-${Date.now().toString().slice(-6)}-${index + 1}`, category: item.category.trim() || "Boshqa",
+        price: Number(item.price) || 0, cost: Number(item.cost), stock: receivedQuantity, defectiveStock: defectiveQuantity, defects: defect ? [defect] : [], measurementType: item.measurementType || "count",
+        status: sellableStock === 0 ? "out" : sellableStock < 10 ? "low" : "active", supplierId: group.supplierId, supplierName: group.supplierName,
+        packaging: item.packaging, measurementUnit: item.measurementUnit || "dona", extraMeasurement: isMeterUnit(item.measurementUnit) ? tx("Uzunligi (metr)") : item.extraMeasurement, extraMeasurementValue: Number(item.extraMeasurementValue) || 0,
+        unitsPerPackage: Number(item.unitsPerPackage) || 0, liters: Number(item.liters) || 0, weight: Number(item.weight) || 0, volume: Number(item.volume) || 0,
         length: Number(item.length) || 0, width: Number(item.width) || 0, height: Number(item.height) || 0,
       };
     });
-    const totalQuantity = productsForReceipt.reduce((sum, item) => sum + item.stock, 0);
     const totalAmount = productsForReceipt.reduce((sum, item) => sum + item.stock * item.cost, 0);
-    const order = {
-      id: `PO-${Date.now().toString().slice(-6)}`,
-      supplierId,
-      items: totalQuantity,
-      productCount: productsForReceipt.length,
-      productNames: productsForReceipt.map((item) => item.name),
-      productIds: productsForReceipt.map((item) => item.id),
-      productDetails: productsForReceipt.map((item) => ({ id: item.id, name: item.name, quantity: item.stock, measurementType: item.measurementType, packaging: item.packaging, cost: item.cost })),
-      amount: totalAmount,
-      remaining: newSupplierDebt,
-      payment: newSupplierCash === totalAmount ? "Naqd" : newSupplierCash ? "Qisman" : "Qarz",
-      status: newSupplierDebt === 0 ? "paid" : newSupplierCash ? "partial" : "debt",
-      paymentHistory: newSupplierCash > 0 ? [{ id: `PAY-INITIAL-${Date.now()}`, amount: newSupplierCash, method: "Naqd", date: createdAt, kind: "initial" }] : [],
-      received: true,
-      date: createdAt,
-    };
+    const debtTotal = Math.min(totalAmount, moneyValue(newSupplierDebtInput));
+    let allocatedDebt = 0;
+    const orders = resolvedGroups.map((group, index) => {
+      const items = productsForReceipt.filter((item) => String(item.supplierId) === String(group.supplierId));
+      const amount = items.reduce((sum, item) => sum + item.stock * item.cost, 0);
+      const remaining = index === resolvedGroups.length - 1 ? debtTotal - allocatedDebt : totalAmount > 0 ? Math.min(debtTotal - allocatedDebt, Math.round(debtTotal * amount / totalAmount)) : 0;
+      allocatedDebt += remaining;
+      const paid = amount - remaining;
+      return {
+        id: `${receiptId}-${group.supplierId}`, receiptId, supplierId: group.supplierId, supplierName: group.supplierName, supplierAddress: group.supplierAddress,
+        items: items.reduce((sum, item) => sum + item.stock, 0), productCount: items.length, productNames: items.map((item) => item.name), productIds: items.map((item) => item.id),
+        defectiveItems: items.reduce((sum, item) => sum + Number(item.defectiveStock || 0), 0),
+        productDetails: items.map((item) => ({ id: item.id, name: item.name, description: item.description, quantity: item.stock, defectiveQuantity: item.defectiveStock || 0, defects: item.defects || [], measurementType: item.measurementType, measurementUnit: item.measurementUnit, packaging: item.packaging, cost: item.cost })),
+        amount, remaining, payment: remaining === 0 ? "Naqd" : paid ? "Qisman" : "Qarz", status: remaining === 0 ? "paid" : paid ? "partial" : "debt",
+        paymentHistory: paid > 0 ? [{ id: `PAY-INITIAL-${Date.now()}-${group.supplierId}`, amount: paid, method: "Naqd", date: createdAt, kind: "initial" }] : [],
+        received: true, date: createdAt, farmName: shipmentInfoSkipped ? "" : shipmentInfo.farmName.trim(), tripNumber: shipmentInfoSkipped ? "" : shipmentInfo.tripNumber.trim(),
+      };
+    });
+    const updated = [...prev];
+    resolvedGroups.forEach((group) => {
+      const order = orders.find((item) => String(item.supplierId) === String(group.supplierId));
+      const index = updated.findIndex((item) => String(item.id) === String(group.supplierId));
+      const current = index >= 0 ? updated[index] : group.savedSupplier;
+      const next = {
+        ...(current || {}), id: group.supplierId, name: group.supplierName, phone: group.phone || current?.phone || "", address: group.supplierAddress || current?.address || "",
+        products: Number(current?.products || 0) + order.productCount, purchases: Number(current?.purchases || 0) + order.amount, debt: Number(current?.debt || 0) + order.remaining,
+        lastOrder: createdAt, createdAt: current?.createdAt || createdAt, status: "active",
+      };
+      if (index >= 0) updated[index] = next; else updated.unshift(next);
+    });
+    const supplierIds = [...new Set(orders.map((order) => order.supplierId))];
+    const supplierNames = [...new Set(orders.map((order) => order.supplierName))];
     const receipt = {
-      id: `REC-${Date.now()}`,
-      supplierId,
-      supplier: form.name.trim(),
-      orderId: order.id,
-      items: totalQuantity,
-      productCount: productsForReceipt.length,
-      products: productsForReceipt.map((item) => ({ id: item.id, name: item.name, quantity: item.stock, measurementType: item.measurementType, packaging: item.packaging, cost: item.cost })),
-      amount: order.amount,
-      date: createdAt,
+      id: receiptId, supplierId: supplierIds.length === 1 ? supplierIds[0] : null, supplierIds, supplier: supplierNames.join(", "), supplierNames,
+      supplierAddresses: orders.map((order) => ({ supplierId: order.supplierId, supplierName: order.supplierName, address: order.supplierAddress })),
+      orderId: orders.length === 1 ? orders[0].id : undefined, orderIds: orders.map((order) => order.id), items: productsForReceipt.reduce((sum, item) => sum + item.stock, 0),
+      defectiveItems: productsForReceipt.reduce((sum, item) => sum + item.defectiveStock, 0), productCount: productsForReceipt.length,
+      products: productsForReceipt.map((item) => ({ id: item.id, name: item.name, description: item.description, quantity: item.stock, defectiveQuantity: item.defectiveStock || 0, defects: item.defects || [], measurementType: item.measurementType, measurementUnit: item.measurementUnit, packaging: item.packaging, cost: item.cost, supplierId: item.supplierId, supplierName: item.supplierName })),
+      amount: totalAmount, remaining: debtTotal, date: createdAt, farmName: shipmentInfoSkipped ? "" : shipmentInfo.farmName.trim(), tripNumber: shipmentInfoSkipped ? "" : shipmentInfo.tripNumber.trim(),
     };
     try {
+      const currentProducts = getProducts(null);
       saveSuppliers(updated);
-      const savedProducts = getProducts(null);
-      const products = Array.isArray(savedProducts) ? savedProducts : [];
-      saveProducts([...productsForReceipt, ...products]);
-      saveSupplierOrders(supplierId, [order]);
+      saveProducts([...productsForReceipt, ...(Array.isArray(currentProducts) ? currentProducts : [])]);
+      orders.forEach((order) => saveSupplierOrders(order.supplierId, [order, ...readList(`crm_supplier_orders_${order.supplierId}`)]));
       const savedReceipts = getSupplierReceipts();
       saveSupplierReceipts([receipt, ...(Array.isArray(savedReceipts) ? savedReceipts : [])]);
-    }
-    catch { setErr("Ta'minotchi saqlanmadi. Qayta urinib ko'ring."); return; }
+    } catch { setErr("Ta'minotchi yoki mahsulotlar saqlanmadi. Qayta urinib ko'ring."); return; }
     setSuppliers(updated);
-
-    setForm({
-      name: "",
-      phone: "",
-      ...emptyProduct,
-      status: "active",
-    });
+    setForm({ name: "", phone: "", address: "", existingSupplierId: "", ...emptyProduct, status: "active" });
     setPendingProducts([]);
+    setReceiptSupplierGroups([]);
+    setActiveReceiptSupplierKey("");
     setNewSupplierDebtInput("");
-
+    resetShipmentInfo();
+    setNewSupplierConfirmation(false);
     setOpen(false);
     window.dispatchEvent(new Event("crm-products-updated"));
-
-    toast.success &&
-      toast.success("Ta'minotchi qo'shildi");
+    toast.success && toast.success(`${orders.length} ta ta'minotchidan mahsulotlar qabul qilindi`);
   };
 
   const filtered = suppliers.filter((s) =>
@@ -390,20 +688,25 @@ export default function Suppliers({ onNavigate }) {
               fontFamily: "'Manrope',sans-serif",
               color: "var(--text-primary)",
             }}
-          >{tx("Ta'minotchilar")}</h1>
+          >{tx(activeSection === "suppliers" ? "Ta'minotchilar" : "Qaytarilgan tovarlar")}</h1>
 
           <p
             className="text-sm mt-0.5"
             style={{
               color: "var(--text-muted)",
             }}
-          >{tx("Yetkazib beruvchilar va shartnomalar")}</p>
+          >{tx(activeSection === "suppliers" ? "Yetkazib beruvchilar va shartnomalar" : "Ta’minotchiga qaytarilgan mahsulotlar tarixi")}</p>
         </div>
 
-        <div className="flex items-center gap-2 supplier-heading-actions">
+        {activeSection === "returns" && (
+          <button type="button" className="btn-primary supplier-return-picker-button" aria-label={tx("Tovarni qaytarish")} title={tx("Tovarni qaytarish")} onClick={() => { setReturnSupplierQuery(""); setReturnPickerOpen(true); }}>
+            <PackagePlus size={16} aria-hidden="true" /><span>{tx("Tovarni qaytarish")}</span>
+          </button>
+        )}
+        {activeSection === "suppliers" && <div className="flex items-center gap-2 supplier-heading-actions">
           <button
             type="button"
-            onClick={() => { setProductForm({ supplierId: "", ...emptyProduct }); setProductQueue([]); setSupplierDebtInput(""); setProductErr(""); setProductOpen(true); }}
+            onClick={() => { setProductForm({ supplierId: "", ...emptyProduct }); setProductQueue([]); setSupplierDebtInput(""); setProductErr(""); startShipmentFlow("products"); }}
             aria-label={tx("Mahsulot qo'shish")}
             title={tx("Mahsulot qo'shish")}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-90 supplier-add-product-btn"
@@ -413,11 +716,12 @@ export default function Suppliers({ onNavigate }) {
           <button
             type="button"
             onClick={() => {
-              setForm({ name: "", phone: "", ...emptyProduct, status: "active" });
+              setForm({ name: "", phone: "", address: "", existingSupplierId: "", ...emptyProduct, status: "active" });
               setPendingProducts([]);
+              resetReceiptSupplierGroups();
               setNewSupplierDebtInput("");
               setErr("");
-              setOpen(true);
+              startShipmentFlow("supplier");
             }}
             aria-label={tx("Ta'minotchi qo'shish")}
             title={tx("Ta'minotchi qo'shish")}
@@ -425,9 +729,10 @@ export default function Suppliers({ onNavigate }) {
             style={{ background: "linear-gradient(135deg, var(--brand), var(--brand-hover))", boxShadow: "0 2px 8px rgba(37,99,235,0.25)" }}
           >
             <UserPlus size={16} /><span>{tx("Ta'minotchi qo'shish")}</span></button>
-        </div>
+        </div>}
       </div>
 
+      {activeSection === "suppliers" && <>
       {/* Analitika kartalari */}
       <div className="suppliers-stats grid grid-cols-4 gap-4">
         {[
@@ -450,28 +755,18 @@ export default function Suppliers({ onNavigate }) {
           },
           {
             label: "Jami xaridlar",
-            value:
-              (
-                suppliers.reduce(
-                  (s, x) => s + x.purchases,
-                  0
-                ) / 1000000
-              ).toFixed(0) + " mln",
+            value: formatCurrency(
+              suppliers.reduce((sum, supplier) => sum + (Number(supplier.purchases) || 0), 0)
+            ),
             icon: DollarSign,
             color: "var(--success)",
             bg: "var(--success-light)",
           },
           {
             label: "Qarz",
-            value:
-              (
-                suppliers
-                  .filter((s) => s.debt > 0)
-                  .reduce(
-                    (s, x) => s + x.debt,
-                    0
-                  ) / 1000000
-              ).toFixed(1) + " mln",
+            value: formatCurrency(
+              suppliers.reduce((sum, supplier) => sum + Math.max(0, Number(supplier.debt) || 0), 0)
+            ),
             icon: AlertCircle,
             color: "var(--danger)",
             bg: "var(--danger-light)",
@@ -502,7 +797,7 @@ export default function Suppliers({ onNavigate }) {
             </div>
 
             <div
-              className="text-xl font-display font-bold"
+              className="min-w-0 break-words text-xl font-display font-bold tabular-nums leading-tight [overflow-wrap:anywhere]"
               style={{
                 fontFamily: "'Manrope',sans-serif",
                 color: "var(--text-primary)",
@@ -693,9 +988,7 @@ export default function Suppliers({ onNavigate }) {
                             "var(--danger)",
                         }}
                       >
-                        {tx((s.debt / 1000000).toFixed(
-                          1
-                        ))}{" "}{tx("mln")}</span>
+                        {formatCurrency(s.debt)}</span>
                     ) : (
                       <span
                         className="text-sm"
@@ -757,9 +1050,59 @@ export default function Suppliers({ onNavigate }) {
         </div>
       </div>
 
+      </>}
+      {activeSection === "returns" && <SupplierReturnsLedger records={returnedRecords} showDashboard />}
+      <Modal open={returnPickerOpen} onClose={() => setReturnPickerOpen(false)} title="Tovarni qaytarish" contentOnly>
+        <Field label={tx("Ta'minotchi")}>
+          <input
+            autoFocus
+            className="input-base"
+            value={returnSupplierQuery}
+            onChange={(event) => setReturnSupplierQuery(event.target.value.replace(/^\s*\p{L}/u, (first) => first.toLocaleUpperCase("uz-UZ")))}
+            placeholder={tx("Ta'minotchi qidirish...")}
+          />
+        </Field>
+        <div className="grid gap-2 mt-3" style={{ height: "min(248px, 40vh)", overflowY: "auto", alignContent: "start", scrollbarGutter: "stable" }}>
+          {suppliers.filter((supplier) => String(supplier.name || "").trim().toLocaleUpperCase("uz-UZ").startsWith(returnSupplierQuery.trim().toLocaleUpperCase("uz-UZ"))).map((supplier) => (
+            <button key={supplier.id} type="button" className="btn-ghost" style={{ justifyContent: "flex-start", textAlign: "left" }} onClick={() => { setReturnPickerOpen(false); onNavigate("supplier-" + supplier.id); }}>
+              {supplier.name}{supplier.phone ? " · " + supplier.phone : ""}
+            </button>
+          ))}
+        </div>
+      </Modal>
+
       {/* ============================= */}
       {/* TA'MINOTCHI QO'SHISH MODALI */}
       {/* ============================= */}
+
+      <Modal
+        contentOnly
+        open={shipmentStepOpen}
+        onClose={() => {
+          setShipmentStepOpen(false);
+          setShipmentStepTarget(null);
+          resetShipmentInfo();
+        }}
+        title={tx("Yuk ma'lumotlarini kiriting")}
+        subtitle={tx("Ta'minotchi nomi va reys raqami ixtiyoriy")}
+        icon={Package}
+        width={680}
+      >
+        <div style={{ display: "grid", gap: 16 }}>
+          <ShipmentFields value={shipmentInfo} onChange={setShipmentInfo} skipped={false} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
+            <button type="button" className="supplier-shipment-skip" style={{ marginTop: 0 }} onClick={skipShipmentInfo}>{tx("O'tkazib yuborish")}</button>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn-ghost" onClick={() => {
+                setShipmentStepOpen(false);
+                setShipmentStepTarget(null);
+                resetShipmentInfo();
+              }}>{tx("Bekor qilish")}</button>
+              <button type="button" className="btn-primary" onClick={() => continueShipmentFlow(false)}>{tx("Davom etish")}</button>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         contentOnly
@@ -768,82 +1111,39 @@ export default function Suppliers({ onNavigate }) {
           setOpen(false);
           setErr("");
           setPendingProducts([]);
+          setReceiptSupplierGroups([]);
+          setActiveReceiptSupplierKey("");
           setNewSupplierDebtInput("");
-          setForm({ name: "", phone: "", ...emptyProduct, status: "active" });
+          resetShipmentInfo();
+          setForm({ name: "", phone: "", address: "", existingSupplierId: "", ...emptyProduct, status: "active" });
         }}
         title={tx("Yangi ta'minotchi qo'shish")}
         subtitle={tx("Yetkazib beruvchi ma'lumotlari")}
         icon={Truck}
         width={760}
       >
-        <div
-          style={{
-            display: "grid",
-            gap: 16,
-          }}
-        >
-              <Field label={tx("Ta'minotchi nomi *")}>
-            <input
-              className="input-base"
-              value={form.name}
-                  required
-              onChange={(e) =>
-                updateNewSupplierForm({
-                  ...form,
-                  name: e.target.value,
-                })
-              }
-              placeholder={tx("Global Import MChJ")}
-            />
-          </Field>
-
-          <Field
-            label={tx("Telefon raqami")}
-            hint={tx("Faqat raqam kiritiladi")}
-          >
-            <PhoneInput
-              required
-              value={form.phone}
-              onChange={(v) =>
-                updateNewSupplierForm({
-                  ...form,
-                  phone: v,
-                })
-              }
-            />
-          </Field>
-
-          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>{tx("Tovarni qabul qilish")}</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>{tx("Bir yetkazib beruvchidan kelgan mahsulotlarni bitta qabulga kiriting. Nom, o'lchov birligi, miqdor va tan narxi majburiy.")}</div>
-
-            {pendingProducts.length > 0 && (
-              <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: "var(--brand-light)", border: "1px solid var(--brand-border)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12, fontWeight: 700, color: "var(--brand)" }}>
-                  <span>{tx("Qabulga qo'shilgan mahsulotlar")}</span>
-                  <span>{pendingProducts.length} {tx("xil")}</span>
+        <div style={{ display: "grid", gap: 14 }}>
+          {receiptSupplierGroups.map((group) => {
+            const groupProducts = pendingProducts.filter((item) => item.supplierGroupKey === group.key);
+            return <section key={group.key} style={{ display: "grid", gap: 14 }}>
+                <Field label={tx("Ta'minotchi nomi *")}><input className="input-base" value={form.name} required onChange={(event) => updateNewSupplierName(event.target.value)} placeholder={tx("Global Import MChJ")} /></Field>
+                <Field label={tx("Telefon raqami")} hint={tx("Faqat raqam kiritiladi")}><PhoneInput required value={form.phone} onChange={(value) => updateNewSupplierForm({ ...form, phone: value })} /></Field>
+                <div className={suppliers.length ? "supplier-identity-fields has-saved-suppliers" : "supplier-identity-fields"}>
+                  <Field label={tx("Manzil")}><input className="input-base" value={form.address || ""} onChange={(event) => updateNewSupplierForm({ ...form, address: capitalizeStart(event.target.value) })} placeholder={tx("Ta'minotchi manzili (ixtiyoriy)")} /></Field>
+                  {suppliers.length > 0 && <Field label={tx("Saqlangan ta'minotchi")}><select className="input-base" value={form.existingSupplierId} onChange={(event) => selectSavedSupplier(event.target.value)}><option value="">{tx("Yangi ta'minotchi")}</option>{suppliers.map((supplier) => <option key={supplier.id} value={String(supplier.id)}>{supplier.name}{supplier.phone ? ` · ${supplier.phone}` : ""}</option>)}</select></Field>}
                 </div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  {pendingProducts.map((item, index) => (
-                    <div key={item.key} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "7px 9px", borderRadius: 8, background: "var(--surface)", fontSize: 12, color: "var(--text-secondary)" }}>
-                      <span><b style={{ color: "var(--text-primary)" }}>{index + 1}. {item.productName}</b> · {item.receivedQuantity} {tx(item.measurementType === "weight" ? "kg" : "dona")}</span>
-                      <button type="button" onClick={() => setPendingProducts((items) => items.filter((product) => product.key !== item.key))} style={{ border: 0, background: "transparent", color: "var(--danger)", fontWeight: 700, cursor: "pointer" }}>{tx("O'chirish")}</button>
-                    </div>
-                  ))}
+                {selectedSavedSupplier && <div className="supplier-form-help" style={{ padding: "10px 12px", borderRadius: 10, background: "var(--brand-light)", border: "1px solid var(--brand-border)" }}><strong style={{ display: "block", color: "var(--text-primary)", marginBottom: 4 }}>{tx("Saqlangan ta'minotchi ma'lumotlari")}</strong><span>{tx("Telefon")}: {selectedSavedSupplier.phone || "—"}</span>{selectedSavedSupplier.address && <span> · {tx("Manzil")}: {selectedSavedSupplier.address}</span>}<span> · {tx("Oldingi xaridlar")}: {moneyText(selectedSavedSupplier.purchases || 0)}</span></div>}
+                <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 14 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>{tx("Qabul qilingan tovarlar")}</div>
+                  {groupProducts.length > 0 && <div style={{ display: "grid", gap: 7, margin: "10px 0 14px" }}>{groupProducts.map((item, index) => <div key={item.key} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 9, background: "var(--surface-2)", fontSize: 12 }}><span><b style={{ color: "var(--text-primary)" }}>{index + 1}. {item.productName}</b><span style={{ color: "var(--text-secondary)" }}> · {item.receivedQuantity} {tx(unitLabel(item))} · {moneyText(Number(item.receivedQuantity) * moneyValue(item.cost))}</span>{defectQuantityOf(item) > 0 && <small style={{ display: "block", color: "var(--danger)", marginTop: 3 }}>{tx("Brak")}: {defectQuantityOf(item)} {tx(unitLabel(item))} · {tx(item.defectStatus)} · {moneyText(defectTotalOf(item))}</small>}</span><button type="button" onClick={() => setPendingProducts((items) => items.filter((product) => product.key !== item.key))} style={{ border: 0, background: "transparent", color: "var(--danger)", fontWeight: 700, cursor: "pointer" }}>{tx("O'chirish")}</button></div>)}</div>}
+                  <ReceiptProductFields value={form} onChange={updateNewSupplierForm} suggestions={newSupplierProductSuggestions} onChooseProduct={chooseNewSupplierProduct} />
+                  <button type="button" className="btn-ghost" onClick={addPendingProduct} style={{ marginTop: 14, width: "100%", justifyContent: "center", border: "1px dashed var(--brand)", color: "var(--brand)" }}><Plus size={16} />{tx("Boshqa tovar qo'shish")}</button>
                 </div>
-              </div>
-            )}
-
-            <ReceiptProductFields value={form} onChange={updateNewSupplierForm} packagingOptions={packagingOptions} extraMeasurementOptions={extraMeasurementOptions} />
-
-            <button type="button" className="btn-ghost" onClick={addPendingProduct} style={{ marginTop: 14, width: "100%", justifyContent: "center", border: "1px dashed var(--brand)", color: "var(--brand)" }}>
-              <Plus size={16} />{tx("Yana mahsulot qo'shish")}
-            </button>
-          </div>
-
+            </section>;
+          })}
           <div className="supplier-receipt-payment-grid">
             <div className="supplier-receipt-payment-total"><small>{tx("Umumiy summa")}</small><b>{moneyText(newSupplierTotal)}</b></div>
-            <Field label={tx("Qarzga yoziladi")}><div className="supplier-money-input"><input className="input-base" inputMode="decimal" value={newSupplierDebtInput === "" ? "" : moneyInputValue(newSupplierDebtInput)} onChange={(event) => setNewSupplierDebtInput(event.target.value === "" ? "" : String(Math.min(newSupplierTotal, toBaseMoney(event.target.value))))} placeholder="0"/><span>{tx("so'm")}</span></div></Field>
+            <Field label={tx("Qarzga yoziladi")}><div className="supplier-money-input"><input className="input-base" inputMode="numeric" value={newSupplierDebtInput === "" ? "" : moneyInputValue(newSupplierDebtInput)} onChange={(event) => { const digits = event.target.value.replace(/\D/g, ""); setNewSupplierDebtInput(digits ? String(Math.min(newSupplierTotal, toBaseMoney(digits))) : ""); }} placeholder="0"/><span>{tx("so'm")}</span></div></Field>
             <div className="supplier-receipt-payment-total supplier-receipt-cash"><small>{tx("Naqd to'lov")}</small><b>{moneyText(newSupplierCash)}</b></div>
           </div>
 
@@ -878,8 +1178,12 @@ export default function Suppliers({ onNavigate }) {
                 setOpen(false);
                 setErr("");
                 setPendingProducts([]);
+                setReceiptSupplierGroups([]);
+                setActiveReceiptSupplierKey("");
                 setNewSupplierDebtInput("");
-                setForm({ name: "", phone: "", ...emptyProduct, status: "active" });
+                setNewSupplierConfirmation(false);
+                resetShipmentInfo();
+                setForm({ name: "", phone: "", address: "", existingSupplierId: "", ...emptyProduct, status: "active" });
               }}
             >{tx("Bekor qilish")}</button>
 
@@ -893,69 +1197,102 @@ export default function Suppliers({ onNavigate }) {
         </div>
       </Modal>
 
+      <Modal contentOnly open={newSupplierConfirmation} onClose={() => setNewSupplierConfirmation(false)} title={tx("Qabulni tasdiqlash")} subtitle={tx("Ta'minotchi va mahsulot ma'lumotlarini tekshiring")} icon={Package} width={600}>
+        <div className="supplier-receipt-confirm">
+          <div className="supplier-receipt-items">
+            {receiptSupplierGroups.map((group) => {
+              const items = newSupplierDrafts.filter((item) => item.supplierGroupKey === group.key);
+              const amount = items.reduce((sum, item) => sum + (Number(item.receivedQuantity) || 0) * moneyValue(item.cost), 0);
+              const defects = items.reduce((sum, item) => sum + defectQuantityOf(item), 0);
+              return <section key={group.key}>
+                <div><span><b>{group.name || tx("Ta'minotchi")}</b><small>{group.phone}{group.address ? ` · ${group.address}` : ""}</small></span><strong>{moneyText(amount)}</strong></div>
+                {items.map((item, index) => <div key={`${group.key}-${item.existingId || item.sku || item.productName}-${index}`}>
+                  <span><b>{capitalizeStart(item.productName)}</b><small>{Number(item.receivedQuantity) || 0} {tx(unitLabel(item))}{defectQuantityOf(item) > 0 ? ` · ${tx("Brak")}: ${defectQuantityOf(item)} · ${moneyText(defectTotalOf(item))}` : ""} · {tx("Tan narxi")}: {moneyText(moneyValue(item.cost))}</small></span>
+                  <strong>{moneyText((Number(item.receivedQuantity) || 0) * moneyValue(item.cost))}</strong>
+                </div>)}
+                <small>{tx("Brak miqdori")}: {defects} {tx("birlik")}</small>
+              </section>;
+            })}
+          </div>
+          <dl className="supplier-receipt-totals">
+            <div><dt>{tx("Ta'minotchilar")}</dt><dd>{receiptSupplierGroups.length}</dd></div>
+            <div><dt>{tx("Mahsulotlar")}</dt><dd>{newSupplierDrafts.length} {tx("xil")}</dd></div>
+            <div><dt>{tx("Jami summa")}</dt><dd>{moneyText(newSupplierTotal)}</dd></div>
+            <div className="receipt-debt"><dt>{tx("Qarzga yoziladi")}</dt><dd>{moneyText(newSupplierDebt)}</dd></div>
+            <div className="receipt-cash"><dt>{tx("Naqd to'lov")}</dt><dd>{moneyText(newSupplierCash)}</dd></div>
+          </dl>
+          <p className="supplier-receipt-question">{tx("Ushbu ma'lumotlar bilan mahsulotlarni qabul qilishni tasdiqlaysizmi?")}</p>
+          <div className="supplier-receipt-buttons">
+            <button className="btn-ghost" onClick={() => setNewSupplierConfirmation(false)}>{tx("Bekor qilish")}</button>
+            <button className="btn-primary" onClick={submit}><Package size={15} />{tx("Tasdiqlash va saqlash")}</button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         contentOnly
         open={productOpen}
-        onClose={() => { setProductOpen(false); setProductErr(""); setProductQueue([]); setSupplierDebtInput(""); setProductForm({ supplierId: "", ...emptyProduct }); }}
-        title={tx("Ta'minotchiga mahsulot qo'shish")}
-        subtitle={tx("Mahsulotni mavjud ta'minotchiga biriktiring")}
+        onClose={() => { setProductOpen(false); setProductErr(""); setProductQueue([]); setSupplierDebtInput(""); setProductForm({ supplierId: "", ...emptyProduct }); resetShipmentInfo(); }}
+        title={tx("Yukdagi mahsulotlarni qabul qilish")}
+        subtitle={tx("Bir yukni bir nechta ta'minotchidan qabul qiling")}
         icon={Package}
         width={680}
       >
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ padding: 12, borderRadius: 12, background: "var(--brand-light)", color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>
-            {tx("Ta'minotchi, mahsulot nomi, o'lchov birligi, miqdor va tan narxi majburiy. Qolgan maydonlarni ixtiyoriy to'ldiring.")}
+            {tx("Har bir mahsulotga o'z ta'minotchisini tanlang. Bir yuk qabulida bir nechta ta'minotchining mahsulotlarini kiritish mumkin.")}
           </div>
 
           <Field label={tx("Ta'minotchi *")}>
             <select className="input-base" value={productForm.supplierId} onChange={(event) => {
               if (event.target.value === String(productForm.supplierId)) { setProductErr(""); return; }
-              const currentLineHasInput = Object.entries(emptyProduct).some(([key, emptyValue]) => key !== "measurementType" && productForm[key] !== emptyValue);
-              if (productQueue.length || currentLineHasInput) {
-                setProductErr("Ta'minotchini almashtirishdan oldin joriy mahsulot ma'lumotlarini tozalang va qabul qatorlarini o'chiring.");
+              const currentLineHasInput = Object.entries(emptyProduct).some(([key, emptyValue]) => !["measurementType", "measurementUnit"].includes(key) && productForm[key] !== emptyValue);
+              if (currentLineHasInput) {
+                setProductErr("Ta'minotchini almashtirishdan oldin joriy mahsulotni qabul ro'yxatiga qo'shing yoki maydonlarni tozalang.");
                 return;
               }
               setProductForm({ ...emptyProduct, supplierId: event.target.value });
-              setSupplierDebtInput("");
               setProductErr("");
             }} required>
               <option value="">{tx("Ta'minotchini tanlang")}</option>
+              <option value="street">{tx("Ko'chadan / ta'minotchisiz")}</option>
               {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
             </select>
           </Field>
-          {!suppliers.length && <p className="supplier-form-help">{tx("Avval kamida bitta ta'minotchi qo'shing.")}</p>}
+          {!suppliers.length && <p className="supplier-form-help">{tx("Ta'minotchi yo'q bo'lsa, Ko'chadan variantini tanlang.")}</p>}
 
           {productQueue.length > 0 && (
             <div style={{ padding: 12, borderRadius: 12, background: "var(--brand-light)", border: "1px solid var(--border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12, fontWeight: 700, color: "var(--brand)" }}><span>{tx("Qo'shilgan mahsulotlar")}</span><span>{productQueue.length} {tx("xil")}</span></div>
-              <div style={{ display: "grid", gap: 6 }}>{productQueue.map((item, index) => <div key={item.key} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 9px", borderRadius: 8, background: "var(--surface)", fontSize: 12 }}><span>{index + 1}. <b>{item.productName}</b> · {item.receivedQuantity} {tx(item.measurementType === "weight" ? "kg" : "dona")}</span><button type="button" onClick={() => setProductQueue((items) => items.filter((product) => product.key !== item.key))} style={{ border: 0, background: "transparent", color: "var(--danger)", cursor: "pointer" }}>{tx("O'chirish")}</button></div>)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8, fontSize: 12, fontWeight: 700, color: "var(--brand)" }}><span>{tx("Qo'shilgan mahsulotlar")}</span><span>{productQueue.length} {tx("xil")} · {tx("Jami")}: {productQueue.reduce((sum, item) => sum + Number(item.receivedQuantity || 0), 0)} {tx("dona")} · {tx("Brak")}: {productQueue.reduce((sum, item) => sum + defectQuantityOf(item), 0)} {tx("dona")}</span></div>
+                <div style={{ display: "grid", gap: 6 }}>{productQueue.map((item, index) => <div key={item.key} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 9px", borderRadius: 8, background: "var(--surface)", fontSize: 12 }}><span>{index + 1}. <b>{item.productName}</b> · {item.receivedQuantity} {tx(unitLabel(item))} · {item.supplierId === "street" ? tx("Ko'chadan") : suppliers.find((supplier) => String(supplier.id) === String(item.supplierId))?.name}{defectQuantityOf(item) > 0 && <small style={{ display: "block", color: "var(--danger)", marginTop: 3 }}>{tx("Brak")}: {defectQuantityOf(item)} {tx(unitLabel(item))} · {tx(item.defectStatus)} · {tx("Brak summasi")}: {moneyText(defectTotalOf(item))}</small>}</span><button type="button" onClick={() => setProductQueue((items) => items.filter((product) => product.key !== item.key))} style={{ border: 0, background: "transparent", color: "var(--danger)", cursor: "pointer" }}>{tx("O'chirish")}</button></div>)}</div>
             </div>
           )}
 
-          <ReceiptProductFields value={productForm} onChange={updateProductForm} packagingOptions={packagingOptions} extraMeasurementOptions={extraMeasurementOptions} suggestions={productSuggestions} onChooseProduct={(product) => { chooseProduct(product); setProductErr(""); }} disabled={!productForm.supplierId} />
+          <ReceiptProductFields value={productForm} onChange={updateProductForm} suggestions={productSuggestions} onChooseProduct={(product) => { chooseProduct(product); setProductErr(""); }} disabled={!productForm.supplierId} />
 
           <button type="button" className="btn-ghost" disabled={!productForm.supplierId} onClick={queueProduct} style={{ width: "100%", justifyContent: "center", border: "1px dashed var(--brand)", color: "var(--brand)" }}><Plus size={16} />{tx("Yana mahsulot qo'shish")}</button>
 
           <div className="supplier-receipt-payment-grid">
             <div className="supplier-receipt-payment-total"><small>{tx("Umumiy summa")}</small><b>{moneyText(receiptTotal)}</b></div>
-            <Field label={tx("Qarzga yoziladi")}><div className="supplier-money-input"><input className="input-base" inputMode="decimal" value={supplierDebtInput === "" ? "" : moneyInputValue(supplierDebtInput)} onChange={(event) => setSupplierDebtInput(event.target.value === "" ? "" : String(Math.min(receiptTotal, toBaseMoney(event.target.value))))} placeholder="0"/><span>{tx("so'm")}</span></div></Field>
+            <Field label={tx("Qarzga yoziladi")}><div className="supplier-money-input"><input className="input-base" inputMode="numeric" disabled={supplierDebtLimit === 0} value={supplierDebtInput === "" ? "" : moneyInputValue(supplierDebtInput)} onChange={(event) => { const digits = event.target.value.replace(/\D/g, ""); setSupplierDebtInput(digits ? String(Math.min(supplierDebtLimit, toBaseMoney(digits))) : ""); }} placeholder="0"/><span>{tx("so'm")}</span></div></Field>
             <div className="supplier-receipt-payment-total supplier-receipt-cash"><small>{tx("Naqd to'lov")}</small><b>{moneyText(receiptCash)}</b></div>
           </div>
 
           {productErr && <div style={{ fontSize: 12, padding: "10px 12px", borderRadius: 10, background: "var(--danger-light)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>{tx(productErr)}</div>}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button type="button" className="btn-ghost" onClick={() => { setProductOpen(false); setProductErr(""); setProductQueue([]); setSupplierDebtInput(""); setProductForm({ supplierId: "", ...emptyProduct }); }}>{tx("Bekor qilish")}</button>
+            <button type="button" className="btn-ghost" onClick={() => { setProductOpen(false); setProductErr(""); setProductQueue([]); setSupplierDebtInput(""); setProductForm({ supplierId: "", ...emptyProduct }); resetShipmentInfo(); }}>{tx("Bekor qilish")}</button>
             <button type="button" className="btn-primary" onClick={addProductToSupplier}><Plus size={15} />{tx("Tovarni qabul qilish")}</button>
           </div>
         </div>
       </Modal>
       <Modal contentOnly open={!!receiptConfirmation} onClose={() => setReceiptConfirmation(false)} title={tx("Mahsulotlarni qabul qilish")} subtitle={tx("Ma'lumotlarni tekshirib, qabul qilishni tasdiqlang")} icon={Package} width={560}>
         <div className="supplier-receipt-confirm">
-          <div className="supplier-receipt-heading"><strong>{suppliers.find((item) => String(item.id) === String(productForm.supplierId))?.name}</strong><time dateTime={receiptConfirmation || undefined}>{receiptConfirmation && new Date(receiptConfirmation).toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time></div>
-          <div className="supplier-receipt-items">{receiptDrafts.map((item, index) => <div key={index}><span><b>{capitalizeStart(item.productName)}</b><small>{Number(item.receivedQuantity)} {tx(item.measurementType === "weight" ? "kg" : "dona")}{item.packaging ? ` · ${tx(item.packaging)}` : ""}</small></span><strong>{moneyText(Number(item.receivedQuantity) * Number(item.cost || 0))}</strong></div>)}</div>
-          <dl className="supplier-receipt-totals"><div><dt>{tx("Mahsulotlar")}</dt><dd>{receiptDrafts.length} {tx("xil")} · {receiptDrafts.reduce((sum, item) => sum + Number(item.receivedQuantity || 0), 0)} {tx("birlik")}</dd></div><div><dt>{tx("Jami summa")}</dt><dd>{moneyText(receiptTotal)}</dd></div><div className="receipt-cash"><dt>{tx("Naqd to'lov")}</dt><dd>{moneyText(receiptCash)}</dd></div><div className="receipt-debt"><dt>{tx("Qarzga yoziladi")}</dt><dd>{moneyText(receiptDebt)}</dd></div></dl>
-          <p className="supplier-receipt-question">{tx("Ushbu ta'minotchidan mahsulotlarni ko'rsatilgan naqd to'lov va qarz bilan qabul qilishni tasdiqlaysizmi?")}</p>
+          <div className="supplier-receipt-heading"><strong>{[...new Set(receiptDrafts.map((draft) => draft.supplierId === "street" ? tx("Ko'chadan") : suppliers.find((item) => String(item.id) === String(draft.supplierId))?.name).filter(Boolean))].join(", ")}</strong><time dateTime={receiptConfirmation || undefined}>{receiptConfirmation && new Date(receiptConfirmation).toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time></div>
+          {!shipmentInfoSkipped && [shipmentInfo.farmName, shipmentInfo.tripNumber].some((value) => value.trim()) && <p className="supplier-receipt-question">{[shipmentInfo.farmName && `${tx("Ferma / ta'minotchi")}: ${shipmentInfo.farmName}`, shipmentInfo.tripNumber && `${tx("Reys")}: ${shipmentInfo.tripNumber}`].filter(Boolean).join(" · ")}</p>}
+          <div className="supplier-receipt-items">{receiptDrafts.map((item, index) => <div key={index}><span><b>{capitalizeStart(item.productName)}</b><small>{item.supplierId === "street" ? tx("Ko'chadan") : suppliers.find((supplier) => String(supplier.id) === String(item.supplierId))?.name} · {Number(item.receivedQuantity)} {tx(unitLabel(item))}{defectQuantityOf(item) > 0 ? ` · ${tx("Brak")}: ${defectQuantityOf(item)} ${tx(unitLabel(item))} · ${tx(item.defectStatus)} · ${tx("Brak summasi")}: ${moneyText(defectTotalOf(item))}` : ""}</small></span><strong>{moneyText(Number(item.receivedQuantity) * Number(item.cost || 0))}</strong></div>)}</div>
+          <dl className="supplier-receipt-totals"><div><dt>{tx("Mahsulotlar")}</dt><dd>{receiptDrafts.length} {tx("xil")} · {receiptDrafts.reduce((sum, item) => sum + Number(item.receivedQuantity || 0), 0)} {tx("birlik")}</dd></div><div><dt>{tx("Brak miqdori")}</dt><dd>{receiptDefectQuantity} {tx("birlik")}</dd></div><div><dt>{tx("Brak summasi")}</dt><dd>{moneyText(receiptDefectTotal)}</dd></div><div><dt>{tx("Jami summa")}</dt><dd>{moneyText(receiptTotal)}</dd></div><div className="receipt-cash"><dt>{tx("Naqd to'lov")}</dt><dd>{moneyText(receiptCash)}</dd></div><div className="receipt-debt"><dt>{tx("Qarzga yoziladi")}</dt><dd>{moneyText(receiptDebt)}</dd></div></dl>
+          <p className="supplier-receipt-question">{tx("Ushbu yukdagi mahsulotlarni ko'rsatilgan naqd to'lov va qarz bilan qabul qilishni tasdiqlaysizmi?")}</p>
           <div className="supplier-receipt-buttons"><button className="btn-ghost" onClick={() => setReceiptConfirmation(false)}>{tx("Bekor qilish")}</button><button className="btn-primary" onClick={addProductToSupplier}>{tx("Ha, qabul qilish")}</button></div>
         </div>
       </Modal>

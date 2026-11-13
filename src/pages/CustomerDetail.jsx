@@ -147,11 +147,63 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
   const customerSpentAfterReturns = profileSales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
   const debtSales = profileSales.filter((sale) => Number(sale.debtBalance || 0) > 0);
   const activeDebtSale = debtSales.find((sale) => sale.id === debtDetailSaleId);
+  const activeDebtReturns = activeDebtSale ? customerReturns.filter((record) => String(record.saleId) === String(activeDebtSale.id)) : [];
+  const activeDebtReturnedAmount = activeDebtReturns.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const activeDebtReturnedQuantity = activeDebtReturns.reduce((sum, record) => sum + Number(record.quantity || 0), 0);
+  const activeDebtOriginalAmount = Number(activeDebtSale?.amount || 0) + activeDebtReturnedAmount;
+  const activeDebtPaidAmount = Number(activeDebtSale?.paidAmount ?? activeDebtSale?.initialPaidAmount ?? Math.max(0, Number(activeDebtSale?.amount || 0) - Number(activeDebtSale?.debtBalance || 0)));
+  const activeDebtItemQuantity = activeDebtSale?.items?.length
+    ? activeDebtSale.items.reduce((sum, item) => sum + Number(item.qty ?? item.quantity ?? 0), 0)
+    : Number(activeDebtSale?.products || 0);
+  const activeDebtDueDate = activeDebtSale?.debtDueDate ? new Date(String(activeDebtSale.debtDueDate).includes("T") ? activeDebtSale.debtDueDate : `${activeDebtSale.debtDueDate}T23:59:59`) : null;
+  const activeDebtOverdueDays = activeDebtDueDate && !Number.isNaN(activeDebtDueDate.getTime())
+    ? Math.max(0, Math.floor((Date.now() - activeDebtDueDate.getTime()) / 86400000))
+    : 0;
   const debtAmount = profileSales.some((sale) => sale.debtBalance !== undefined)
     ? debtSales.reduce((sum, sale) => sum + sale.debtBalance, 0)
     : Number(customer.debt || 0);
   const [paymentModalSale, setPaymentModalSale] = useState(null);
   const paymentSale = paymentModalSale || activeDebtSale || (debtSales.length === 1 ? debtSales[0] : null);
+  const renderDebtPurchaseCard = (sale, selected = false) => {
+    const items = Array.isArray(sale.items) ? sale.items : [];
+    const itemQuantity = items.length
+      ? items.reduce((sum, item) => sum + Number(item.qty ?? item.quantity ?? 0), 0)
+      : Number(sale.products || 0);
+    const itemTypes = Number(sale.products || items.length || 0);
+    const paid = Number(sale.paidAmount ?? sale.initialPaidAmount ?? Math.max(0, Number(sale.amount || 0) - Number(sale.debtBalance || 0)));
+    const content = <>
+      <span className="customer-debt-purchase-content">
+        <span className="customer-debt-purchase-heading">
+          <b>{sale.displayId || sale.id}</b>
+          <span>{dateLabel(sale.createdAt || sale.date)}</span>
+        </span>
+        <span className="customer-debt-purchase-items">
+          {items.length > 0 ? items.map((item, index) => (
+            <span className="customer-debt-purchase-item" key={`${sale.id}-${item.id ?? index}-${index}`}>
+              <span>{item.name || tx("Mahsulot")}</span>
+              <b>{Number(item.qty ?? item.quantity ?? 0).toLocaleString("uz-UZ")} {tx("dona")}</b>
+            </span>
+          )) : <span className="customer-debt-purchase-item">{tx(itemTypes)}{tx(" xil mahsulot")}</span>}
+        </span>
+        <span className="customer-debt-purchase-stats">
+          <span><small>{tx("Jami miqdor")}</small><b>{itemQuantity.toLocaleString("uz-UZ")} {tx("dona")} · {tx(itemTypes)}{tx(" xil")}</b></span>
+          <span><small>{tx("Sotuv summasi")}</small><b>{formatCurrency(sale.amount)}</b></span>
+          <span><small>{tx("To‘langan")}</small><b>{formatCurrency(paid)}</b></span>
+        </span>
+      </span>
+      <span className="customer-debt-purchase-balance"><small>{tx("Qolgan qarz")}</small><b>{formatCurrency(sale.debtBalance)}</b></span>
+    </>;
+    if (selected) return <div className="customer-debt-purchase is-selected">{content}</div>;
+    return <button
+      key={sale.id}
+      type="button"
+      className="customer-debt-purchase"
+      onClick={() => {
+        setSelectedSaleId(sale.id);
+        setDebtDetailSaleId(sale.id);
+      }}
+    >{content}</button>;
+  };
   const toggleSale = (id) => {
     setSelectedSaleId(id);
     setExpandedSaleId((current) => current === id ? null : id);
@@ -159,22 +211,43 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
 
   const requestProductReturn = (sale, item, index) => {
     const returnKey = returnKeyFor(sale.id, item.id, index);
-    const quantity = Number(item.qty || 1);
+    const quantity = Number(item.qty ?? item.quantity ?? 1);
     const returned = item.returned ? quantity : returnedQuantityFor(returnRecords, returnKey, quantity);
     const remainingQuantity = Math.max(0, quantity - returned);
     if (!remainingQuantity) return;
-    setPendingReturn({ sale, item, index, returnKey, quantity: "1", returned, remainingQuantity });
+    let originalSale = sale;
+    try { originalSale = getSales().find((entry) => String(entry.id) === String(sale.id)) || sale; } catch { /* Use the visible sale if it is not in the saved list. */ }
+    const soldLines = Array.isArray(originalSale.items) && originalSale.items.length ? originalSale.items : sale.items || [];
+    const grossItemsTotal = soldLines.reduce((sum, line) => sum + Number(line.price || 0) * Number(line.qty ?? line.quantity ?? 0), 0);
+    const originalAmount = Number(originalSale.amount ?? originalSale.total ?? sale.amount ?? grossItemsTotal);
+    const itemQuantity = Number(item.qty ?? item.quantity ?? 0);
+    const baseUnitPrice = Number(item.price ?? (itemQuantity > 0 && item.total != null ? Number(item.total) / itemQuantity : 0));
+    const unitPrice = Math.round(baseUnitPrice * (grossItemsTotal > 0 ? originalAmount / grossItemsTotal : 1));
+    setPendingReturn({ sale, item, index, returnKey, unitPrice, goodQuantity: "0", defectiveQuantity: "0", reason: "", returned, remainingQuantity });
   };
 
   const confirmProductReturn = () => {
     if (!pendingReturn) return;
     const { sale, item, returnKey, returned, remainingQuantity } = pendingReturn;
-    const quantity = Number(pendingReturn.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > remainingQuantity) {
+    const goodQuantity = Number(pendingReturn.goodQuantity || 0);
+    const defectiveQuantity = Number(pendingReturn.defectiveQuantity || 0);
+    const quantity = goodQuantity + defectiveQuantity;
+    if (![goodQuantity, defectiveQuantity].every(Number.isInteger) || goodQuantity < 0 || defectiveQuantity < 0 || quantity < 1 || quantity > remainingQuantity) {
       error("Miqdorni tekshiring", `1 dan ${remainingQuantity} gacha butun son kiriting.`);
       return;
     }
 
+    const stockProducts = getProducts();
+    const currentProduct = Array.isArray(stockProducts) ? stockProducts.find((product) => String(product.id) === String(item.id)) : null;
+    if (!currentProduct) {
+      error("Mahsulot omborda topilmadi", "Qaytarish saqlanmadi. Mahsulot qoldig‘ini tekshiring.");
+      return;
+    }
+    const currentStock = Math.max(0, Number(currentProduct.stock || 0));
+    const recordedDefects = (currentProduct.defects || []).reduce((sum, defect) => sum + Number(defect.quantity || 0), 0);
+    const currentDefectiveStock = Math.min(currentStock, Math.max(0, Number(currentProduct.defectiveStock || 0), recordedDefects));
+    const reason = pendingReturn.reason.trim() || "Mijoz tovarni qaytardi";
+    const unitPrice = Number(pendingReturn.unitPrice ?? item.price ?? 0);
     const record = {
       id: `R-${Date.now()}`,
       returnKey,
@@ -182,55 +255,79 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
       customer: customer.name,
       productId: item.id,
       product: item.name,
+      category: item.category || currentProduct.category || "",
       purchaseDate: sale.createdAt || sale.date || "",
       quantity,
-      amount: Number(item.price || 0) * quantity,
+      goodQuantity,
+      defectiveQuantity,
+      unitPrice,
+      unitCost: Number(currentProduct.cost || item.cost || 0),
+      amount: unitPrice * quantity,
       deliveryAddress: item.deliveryAddress || sale.deliveryAddress || "Manzil biriktirilmagan",
-      reason: "Mijoz tovarni qaytardi",
+      reason,
       date: new Date().toISOString(),
       status: "approved",
     };
-    const updated = [record, ...returnRecords];
-    saveReturns(updated);
-    setReturnRecords(updated);
-
     try {
       const savedSales = getSales();
-      if (Array.isArray(savedSales)) {
-        const sales = savedSales.map((savedSale) => {
-          if (String(savedSale.id) !== String(sale.id)) return savedSale;
-          return {
-            ...savedSale,
-            items: (savedSale.items || []).map((savedItem, savedIndex) =>
-              String(savedItem.id) === String(item.id) && savedIndex === pendingReturn.index
-                ? {
-                  ...savedItem,
-                  returnedQuantity: returned + quantity,
-                  returned: returned + quantity >= Number(savedItem.qty || 1),
-                  returnedAt: record.date,
-                }
-                : savedItem
-            ),
-          };
-        });
-        saveSales(sales);
-      }
-
-      const savedProducts = getProducts();
-      if (Array.isArray(savedProducts)) {
-        const products = savedProducts.map((product) =>
-          String(product.id) === String(item.id)
-            ? { ...product, stock: Number(product.stock || 0) + quantity }
-            : product
-        );
-        saveProducts(products);
-      }
+      if (!Array.isArray(savedSales)) throw new Error("Savdo ma’lumoti o‘qilmadi.");
+      const sales = savedSales.map((savedSale) => {
+        if (String(savedSale.id) !== String(sale.id)) return savedSale;
+        return {
+          ...savedSale,
+          items: (savedSale.items || []).map((savedItem, savedIndex) =>
+            String(savedItem.id) === String(item.id) && savedIndex === pendingReturn.index
+              ? { ...savedItem, returnedQuantity: returned + quantity, returned: returned + quantity >= Number(savedItem.qty ?? savedItem.quantity ?? 1), returnedAt: record.date }
+              : savedItem
+          ),
+        };
+      });
+      const defect = defectiveQuantity > 0 ? {
+        id: `customer-return-${record.id}`,
+        product: item.name,
+        category: record.category,
+        quantity: defectiveQuantity,
+        reason: `Mijoz qaytargan: ${reason}`,
+        status: "Brak",
+        unitPrice,
+        total: unitPrice * defectiveQuantity,
+        date: record.date,
+        sourceReturnId: record.id,
+      } : null;
+      const products = stockProducts.map((product) => String(product.id) !== String(item.id) ? product : {
+        ...product,
+        stock: currentStock + quantity,
+        stockIn: Number(product.stockIn || 0) + quantity,
+        defectiveStock: currentDefectiveStock + defectiveQuantity,
+        defects: defect ? [...(Array.isArray(product.defects) ? product.defects : []), defect] : product.defects,
+        status: currentStock + quantity - currentDefectiveStock - defectiveQuantity <= 0 ? "out" : currentStock + quantity - currentDefectiveStock - defectiveQuantity < Number(product.minStock || product.minimumStock || 10) ? "low" : "active",
+      });
+      const updated = [record, ...returnRecords];
+      saveProducts(products);
+      saveSales(sales);
+      saveReturns(updated);
+      setReturnRecords(updated);
+      window.dispatchEvent(new Event("crm-products-updated"));
+      window.dispatchEvent(new Event("crm-returns-updated"));
+      try {
+        const savedCustomers = getCustomers();
+        if (Array.isArray(savedCustomers)) {
+          const debtReduction = Math.min(Math.max(0, Number(sale.debtBalance || 0)), unitPrice * quantity);
+          saveCustomers(savedCustomers.map((entry) => entry.name?.trim().toLowerCase() === customer.name.trim().toLowerCase() ? {
+            ...entry,
+            spent: Math.max(0, Number(entry.spent || 0) - unitPrice * quantity),
+            debt: Math.max(0, Number(entry.debt || 0) - debtReduction),
+            status: Number(entry.debt || 0) - debtReduction > 0 ? entry.status : entry.status === "debtor" ? "active" : entry.status,
+          } : entry));
+        }
+      } catch { /* Sales and return details remain the source of truth if a legacy customer summary cannot be updated. */ }
     } catch {
-      // The return record remains valid even if older saved sale data is malformed.
+      error("Qaytarish saqlanmadi", "Ombor yoki qaytarish ma’lumotini saqlashda xatolik yuz berdi. Qayta urinib ko‘ring.");
+      return;
     }
 
     setPendingReturn(null);
-    success("Tovar qaytarildi", item.name);
+    success("Tovar omborga qaytarildi", `${item.name} · ${quantity} dona · ${formatCurrency(unitPrice * quantity)}`);
   };
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -491,6 +588,13 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
       time: payment.date,
       icon: CheckCircle,
       color: "var(--success)",
+    })),
+    ...customerReturns.map((record) => ({
+      type: "return",
+      text: `Mijoz tovar qaytardi — ${formatCurrency(record.amount)} (${record.product || "Mahsulot"})`,
+      time: record.date,
+      icon: RotateCcw,
+      color: "var(--danger)",
     })),
     ...profileSales.filter((sale) => Number(sale.debtBalance || 0) > 0).map((sale) => ({
       type: "debt",
@@ -1016,8 +1120,31 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
               </div>
             )}
 
-      <Modal open={!!selectedReturn} onClose={() => setSelectedReturn(null)} title="Qaytarish tafsilotlari" subtitle={selectedReturn?.id} icon={RotateCcw} width={760} contentOnly>
-        {selectedReturn && <div className="return-document"><div className="return-document-head"><div><small>{tx("QAYTARISH HUJJATI")}</small><h3>{selectedReturn.customer}</h3><p>{dateLabel(selectedReturn.date)}</p></div><span>{tx(returnStatusMap[selectedReturn.status]?.label || "—")}</span></div><dl className="return-document-meta">{[["Sotuv ID",selectedReturn.saleId],["Xarid sanasi",dateLabel(selectedReturn.purchaseDate)],["Manzil",selectedReturn.deliveryAddress || "—"],["Mahsulotlar",tx(selectedReturn.lines.length + " xil")]].map(([label,value]) => <div key={label}><dt>{tx(label)}</dt><dd>{value}</dd></div>)}</dl><div className="return-document-lines">{selectedReturn.lines.map(line => <div key={line.id}><div><b>{line.product}</b><small>{tx("Sabab")}: {tx(line.reason || "Ko‘rsatilmagan")}</small><small>{tx("Miqdor")}: {line.quantity ?? "—"} · {tx("Birlik narxi")}: {formatCurrency(line.unitPrice ?? (line.quantity ? line.amount / line.quantity : 0))}</small></div><strong>{formatCurrency(line.amount)}</strong></div>)}</div><div className="returns-total-summary"><span><small>{tx("Jami qaytarish summasi")}</small><b>{formatCurrency(selectedReturn.amount)}</b></span><div className="return-export-actions"><button onClick={() => exportReturn("print")}><Printer size={16}/>{tx("Chop etish")}</button><button onClick={() => exportReturn("pdf")}><FileText size={16}/>{tx("PDF")}</button><button className="return-export-excel" onClick={() => exportReturn("excel")}><Download size={16}/>{tx("Excel")}</button></div></div></div>}
+      <Modal open={!!selectedReturn} onClose={() => setSelectedReturn(null)} title="Qaytarish tafsilotlari" subtitle={selectedReturn?.id} icon={RotateCcw} width={820} contentOnly>
+        {selectedReturn && (() => {
+          const lines = selectedReturn.lines || [];
+          const hasBreakdown = lines.length > 0 && lines.every(line => line.goodQuantity != null && line.defectiveQuantity != null);
+          const good = lines.reduce((sum, line) => sum + Number(line.goodQuantity || 0), 0);
+          const defective = lines.reduce((sum, line) => sum + Number(line.defectiveQuantity || 0), 0);
+          const quantity = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+          return <div className="return-document customer-return-document">
+            <div className="return-document-head"><div><small>{tx("MIJOZ QAYTARGAN MAHSULOTLAR")}</small><h3>{selectedReturn.customer}</h3><p>{tx("Qaytarilgan sana va vaqt")}: {dateLabel(selectedReturn.date)}</p></div><span>{tx(returnStatusMap[selectedReturn.status]?.label || "—")}</span></div>
+            <dl className="return-document-meta">{[["Sotuv ID",selectedReturn.saleId],["Xarid sanasi",dateLabel(selectedReturn.purchaseDate)],["Manzil",selectedReturn.deliveryAddress || "—"],["Mahsulot turlari",tx(lines.length + " xil")]].map(([label,value]) => <div key={label}><dt>{tx(label)}</dt><dd>{value}</dd></div>)}</dl>
+            <section className="customer-return-items">{lines.map(line => {
+              const unitPrice = Number(line.unitPrice ?? (line.quantity ? line.amount / line.quantity : 0));
+              const lineHasBreakdown = line.goodQuantity != null && line.defectiveQuantity != null;
+              return <article className="customer-return-item" key={line.id}>
+                <div className="customer-return-item-head"><div><h4>{line.product || tx("Mahsulot")}</h4>{line.category && <small>{tx("Kategoriya")}: {tx(line.category)}</small>}</div><strong>{formatCurrency(line.amount)}</strong></div>
+                {lineHasBreakdown ? <div className="customer-return-condition-grid">
+                  <div><b>{tx("Yaroqli")}</b><span>{Number(line.goodQuantity).toLocaleString("uz-UZ")} {tx("dona")}</span><small>{formatCurrency(unitPrice)} · {tx("bir dona")}</small><strong>{formatCurrency(Number(line.goodQuantity) * unitPrice)}</strong></div>
+                  <div className="is-defective"><b>{tx("Brak / yaroqsiz")}</b><span>{Number(line.defectiveQuantity).toLocaleString("uz-UZ")} {tx("dona")}</span><small>{formatCurrency(unitPrice)} · {tx("bir dona")}</small><strong>{formatCurrency(Number(line.defectiveQuantity) * unitPrice)}</strong></div>
+                </div> : <div className="customer-return-legacy"><b>{tx("Qaytarilgan jami")}: {Number(line.quantity || 0).toLocaleString("uz-UZ")} {tx("dona")}</b><small>{tx("Bu eski qaytarish yozuvida yaroqli va brak soni alohida saqlanmagan.")}</small></div>}
+                <div className="customer-return-reason"><small>{tx("Qaytarish sababi")}</small><span>{tx(line.reason || "Ko‘rsatilmagan")}</span></div>
+              </article>;
+            })}</section>
+            <div className="customer-return-summary"><div className="customer-return-summary-counts"><span><small>{tx("Yaroqli jami")}</small><b>{hasBreakdown ? `${good.toLocaleString("uz-UZ")} ${tx("dona")}` : "—"}</b></span><span><small>{tx("Brak jami")}</small><b>{hasBreakdown ? `${defective.toLocaleString("uz-UZ")} ${tx("dona")}` : "—"}</b></span><span><small>{tx("Jami miqdor")}</small><b>{quantity.toLocaleString("uz-UZ")} {tx("dona")}</b></span></div>{!hasBreakdown && <p className="customer-return-history-note">{tx("Eski yozuvlarda yaroqli va brak sonlari alohida saqlanmagan; sonlar taxmin qilinmadi.")}</p>}<div className="customer-return-summary-total"><small>{tx("Umumiy qaytarish summasi")}</small><b>{formatCurrency(selectedReturn.amount)}</b></div><div className="return-export-actions"><button onClick={() => exportReturn("print")}><Printer size={16}/>{tx("Chop etish")}</button><button onClick={() => exportReturn("pdf")}><FileText size={16}/>{tx("PDF")}</button><button className="return-export-excel" onClick={() => exportReturn("excel")}><Download size={16}/>{tx("Excel")}</button></div></div>
+          </div>;
+        })()}
       </Modal>
             {/* DEBT */}
             {tab === "debt" && (
@@ -1066,10 +1193,30 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                       <>
                         <div className="customer-debt-purchases">
                           <h3>{tx("Qarzga olingan xarid")}</h3>
-                          <div className="customer-debt-purchase is-selected">
-                            <span>{activeDebtSale.id} · {tx(activeDebtSale.products)}{tx(" ta mahsulot")}</span>
-                            <strong>{formatCurrency(activeDebtSale.debtBalance)}</strong>
-                          </div>
+                          {renderDebtPurchaseCard(activeDebtSale, true)}
+                          <section className="customer-debt-receipt" aria-label={tx("Xarid tafsilotlari")}>
+                            <div className="customer-debt-receipt-heading"><div><small>{tx("SAVDO HUJJATI")}</small><b>{tx("Xarid tafsilotlari")}</b></div><span>{activeDebtSale.status === "partial" ? tx("Qisman to‘langan") : tx("Qarzdor")}</span></div>
+                            <div className="customer-debt-receipt-meta">
+                              {[
+                                ["Sotuv ID", activeDebtSale.displayId || activeDebtSale.id],
+                                ["Xarid sanasi", dateLabel(activeDebtSale.createdAt || activeDebtSale.date)],
+                                ["To‘lov usuli", activeDebtSale.payment || activeDebtSale.paymentMethod || "—"],
+                                ["Telefon", activeDebtSale.customerPhone || customer.phone || "—"],
+                                ["Yetkazish manzili", activeDebtSale.deliveryAddress || "—"],
+                                ["Sotgan xodim", activeDebtSale.employeeName || "—"],
+                              ].map(([label, value]) => <div key={label}><small>{tx(label)}</small><b>{tx(value)}</b></div>)}
+                            </div>
+                            <div className="customer-debt-receipt-totals">
+                              {[
+                                ["Jami tovar", `${activeDebtItemQuantity.toLocaleString("uz-UZ")} ${tx("dona")}`],
+                                ["Sotuv summasi", formatCurrency(activeDebtOriginalAmount)],
+                                ["Qaytarilgan summa", `− ${formatCurrency(activeDebtReturnedAmount)}`],
+                                ["Qaytarilgan miqdor", `${activeDebtReturnedQuantity.toLocaleString("uz-UZ")} ${tx("dona")}`],
+                                ["Jami to‘langan", formatCurrency(activeDebtPaidAmount)],
+                                ["Qolgan qarz", formatCurrency(activeDebtSale.debtBalance)],
+                              ].map(([label, value], index) => <div className={index === 2 ? "is-returned" : index === 5 ? "is-debt" : ""} key={label}><small>{tx(label)}</small><b>{value}</b></div>)}
+                            </div>
+                          </section>
                           <SaleProductList
                             sale={activeDebtSale}
                             returnRecords={returnRecords}
@@ -1081,7 +1228,7 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                           {[
                             { label: "Qarz yaratilgan sana", value: activeDebtSale.date },
                             { label: "To'lov muddati", value: activeDebtSale.debtDueDate || "Ko'rsatilmagan" },
-                            { label: "Kechikish", value: "0 kun" },
+                            { label: "Kechikish", value: `${activeDebtOverdueDays.toLocaleString("uz-UZ")} ${tx("kun")}` },
                           ].map((item) => (
                             <div
                               key={item.label}
@@ -1108,20 +1255,7 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                     ) : (
                       <div className="customer-debt-purchases">
                         <h3>{tx("Qarzga olingan xaridlar")}</h3>
-                        {debtSales.length > 0 ? debtSales.map((sale) => (
-                          <button
-                            key={sale.id}
-                            type="button"
-                            className="customer-debt-purchase"
-                            onClick={() => {
-                              setSelectedSaleId(sale.id);
-                              setDebtDetailSaleId(sale.id);
-                            }}
-                          >
-                            <span>{sale.id} · {tx(sale.products)}{tx(" ta mahsulot")}</span>
-                            <strong>{formatCurrency(sale.debtBalance)}</strong>
-                          </button>
-                        )) : (
+                        {debtSales.length > 0 ? debtSales.map((sale) => renderDebtPurchaseCard(sale)) : (
                           <p>{tx("Bu qarzga tegishli xarid tafsilotlari kiritilmagan.")}</p>
                         )}
                       </div>
@@ -1566,30 +1700,41 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
 
       {pendingReturn && modalRoot && createPortal(
         <div className="crm-content-modal">
-          <div className="customer-return-confirm" role="dialog" aria-modal="true" aria-labelledby="return-confirm-title">
-            <div className="customer-return-confirm-icon"><RotateCcw size={24} /></div>
-            <h2 id="return-confirm-title">{tx("Tovarni qaytarishni tasdiqlaysizmi?")}</h2>
-            <p><strong>{pendingReturn.item.name}</strong> — {pendingReturn.quantity} {tx("dona qaytarilsinmi?")}</p>
-            <label className="customer-return-quantity">
-              <span>{tx("Qaytariladigan miqdor")}</span>
-              <input
-                type="number"
-                min="1"
-                max={pendingReturn.remainingQuantity}
-                step="1"
-                inputMode="numeric"
-                className="input-base"
-                value={pendingReturn.quantity}
-                onChange={(event) => setPendingReturn({ ...pendingReturn, quantity: event.target.value })}
-              />
-              <small>{tx("Qolgan miqdor")}: {pendingReturn.remainingQuantity} {tx("dona")}</small>
-            </label>
-            <div className="customer-return-confirm-actions">
-              <button type="button" className="btn-ghost" onClick={() => setPendingReturn(null)}>{tx("Bekor qilish")}</button>
-              <button type="button" className="customer-return-confirm-button" onClick={confirmProductReturn}>
-                <RotateCcw size={15} />{tx(" Ha, qaytarish")}</button>
-            </div>
-          </div>
+          {(() => {
+            const product = getProducts().find(entry => String(entry.id) === String(pendingReturn.item.id)) || {};
+            const stock = Math.max(0, Number(product.stock || 0));
+            const recordedDefects = (product.defects || []).reduce((sum, defect) => sum + Number(defect.quantity || 0), 0);
+            const defectiveStock = Math.min(stock, Math.max(0, Number(product.defectiveStock || 0), recordedDefects));
+            const goodQuantity = Number(pendingReturn.goodQuantity || 0);
+            const defectiveQuantity = Number(pendingReturn.defectiveQuantity || 0);
+            const returnQuantity = goodQuantity + defectiveQuantity;
+            const unitPrice = Number(pendingReturn.unitPrice ?? pendingReturn.item.price ?? 0);
+            const returnAmount = returnQuantity * unitPrice;
+            const updateQuantity = (field, value) => {
+              const other = field === "goodQuantity" ? defectiveQuantity : goodQuantity;
+              const max = Math.max(0, pendingReturn.remainingQuantity - other);
+              const next = Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
+              setPendingReturn({ ...pendingReturn, [field]: value === "" ? "" : String(next) });
+            };
+            return <div className="customer-return-confirm customer-return-workflow" role="dialog" aria-modal="true" aria-labelledby="return-confirm-title">
+              <div className="customer-return-workflow-header"><div className="customer-return-confirm-icon"><RotateCcw size={20} /></div><div><h2 id="return-confirm-title">{tx("Mijozdan tovar qaytarish")}</h2><p>{pendingReturn.item.name} · {tx("Sotuv")}: {pendingReturn.sale.id}</p></div><button type="button" className="customer-return-close" onClick={() => setPendingReturn(null)} aria-label={tx("Yopish")}><X size={17}/></button></div>
+              <div className="customer-return-stock-grid">
+                <div><small>{tx("Olingan")}</small><b>{Number(pendingReturn.item.qty ?? pendingReturn.item.quantity ?? 0).toLocaleString("uz-UZ")} {tx("dona")}</b></div>
+                <div><small>{tx("Oldin qaytarilgan")}</small><b>{pendingReturn.returned.toLocaleString("uz-UZ")} {tx("dona")}</b></div>
+                <div><small>{tx("Qaytarish mumkin")}</small><b>{pendingReturn.remainingQuantity.toLocaleString("uz-UZ")} {tx("dona")}</b></div>
+                <div><small>{tx("Hozir omborda")}</small><b>{(stock - defectiveStock).toLocaleString("uz-UZ")} {tx("yaroqli")} · {defectiveStock.toLocaleString("uz-UZ")} {tx("brak")}</b></div>
+              </div>
+              <div className="customer-return-price-note"><span>{tx("Sotuvdagi bir dona narxi")}</span><b>{formatCurrency(unitPrice)}</b></div>
+              <div className="customer-return-condition-grid customer-return-input-grid">
+                <label><b>{tx("Yaroqli tovar")}</b><small>{tx("Yaroqli omborga qaytadi")}</small><input className="input-base" type="number" min="0" max={Math.max(0, pendingReturn.remainingQuantity - defectiveQuantity)} step="1" inputMode="numeric" value={pendingReturn.goodQuantity} onChange={event => updateQuantity("goodQuantity", event.target.value)} /></label>
+                <label className="is-defective"><b>{tx("Brak / yaroqsiz")}</b><small>{tx("Brak omboriga qaytadi")}</small><input className="input-base" type="number" min="0" max={Math.max(0, pendingReturn.remainingQuantity - goodQuantity)} step="1" inputMode="numeric" value={pendingReturn.defectiveQuantity} onChange={event => updateQuantity("defectiveQuantity", event.target.value)} /></label>
+              </div>
+              <label className="customer-return-reason-field"><span>{tx("Qaytarish sababi")}</span><textarea className="input-base" rows="2" value={pendingReturn.reason} onChange={event => setPendingReturn({ ...pendingReturn, reason: event.target.value })} placeholder={tx("Sababini yozing (ixtiyoriy)")} /></label>
+              <div className="customer-return-money-summary"><span>{tx("Jami qaytariladigan")}</span><b>{returnQuantity.toLocaleString("uz-UZ")} {tx("dona")}</b><span>{tx("Qaytariladigan summa")}</span><strong>{formatCurrency(returnAmount)}</strong></div>
+              <p className="customer-return-stock-note">{tx("Tasdiqlanganda yaroqli mahsulot oddiy omborga, brak mahsulot brak omboriga qo‘shiladi. Qaytarish summasi sotuv daromadi va mijoz qarzidan ayriladi.")}</p>
+              <div className="customer-return-confirm-actions"><button type="button" className="btn-ghost" onClick={() => setPendingReturn(null)}>{tx("Bekor qilish")}</button><button type="button" className="customer-return-confirm-button" onClick={confirmProductReturn} disabled={returnQuantity < 1}><RotateCcw size={15} />{tx("Qaytarishni tasdiqlash")}</button></div>
+            </div>;
+          })()}
         </div>,
         modalRoot
       )}

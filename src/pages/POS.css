@@ -2806,6 +2806,9 @@ html:not([data-theme="dark"]) .pos-container .pos-cart-section .cart-item { back
 }
 .pos-container .pos-cart-item-image img { width: 100%; height: 100%; object-fit: contain; }
 .pos-container .pos-cart-section .item-name { margin-bottom: 1px; font-size: 12px; }
+.pos-container.pos-split-layout .pos-cart-section .item-name { display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
+.pos-container.pos-split-layout .pos-cart-section .pos-cart-item-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pos-container.pos-split-layout .pos-cart-section .pos-cart-defect-badge { flex: 0 0 auto; color: var(--danger); font-size: 10px; font-weight: 750; }
 .pos-container .pos-cart-section .item-price { margin-bottom: 3px; font-size: 11px; }
 .pos-container .pos-cart-section .pos-item-controls { gap: 4px; }
 .pos-container .pos-cart-section .pos-qty-controls {
@@ -3517,7 +3520,8 @@ html[data-theme="dark"] .pos-container .pos-cart-address-select { border-color: 
 }
 
 .pos-container.pos-split-layout .pos-order-panel .customer-input-wrapper {
-  position: relative; gap: 8px; }
+  position: relative; z-index: 5; gap: 8px; }
+.pos-container.pos-split-layout .pos-order-panel .customer-suggestions { top: 50px; z-index: 30; }
 .pos-container.pos-split-layout .pos-order-panel .customer-input-box {
   height: 42px;
   border-color: #e1e9f5;
@@ -3550,24 +3554,47 @@ html[data-theme="dark"] .pos-container .pos-cart-address-select { border-color: 
   background: #0751db;
 }
 
+.pos-container.pos-split-layout .pos-order-footer .pos-save-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .pos-container.pos-split-layout .pos-order-footer .pos-save-draft-btn {
   width: 100%;
   min-height: 42px;
-  margin-top: 8px;
+  margin-top: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 5px;
   border: 1px solid #c9d9f2;
   border-radius: 8px;
   background: #f5f9ff;
   color: #2563eb;
-  font-size: 13px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pos-container.pos-split-layout .pos-order-footer .pos-reserve-btn {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #c9d9f2;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 .pos-container.pos-split-layout .pos-order-footer .pos-save-draft-btn:hover:not(:disabled) { background: #eaf2ff; }
-.pos-container.pos-split-layout .pos-order-footer .pos-save-draft-btn:disabled { opacity: .55; cursor: not-allowed; }
+.pos-container.pos-split-layout .pos-order-footer :is(.pos-save-draft-btn, .pos-reserve-btn):disabled { opacity: .55; cursor: not-allowed; }
+.pos-container.pos-split-layout .pos-order-footer .pos-reserve-btn:hover:not(:disabled) { background: #f5f9ff; border-color: #9bbcf7; }
 .pos-save-draft-summary { display: grid; gap: 0; padding: 4px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
 .pos-save-draft-summary > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .pos-save-draft-summary > div:last-child { border-bottom: 0; }
@@ -3777,6 +3804,8 @@ html[data-theme="dark"] .pos-container.pos-split-layout .pos-cart-items-footer .
   font-size: 11px;
 }
 .pos-container .pos-payment-due-date > small { display: block; margin-top: 5px; color: var(--cart-muted); font-size: 10px; }
+.pos-container .pos-payment-date-clear { flex: 0 0 auto; padding: 4px 2px; border: 0; background: transparent; color: var(--cart-muted); font: inherit; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.pos-container .pos-payment-date-clear:hover { color: #1261ed; }
 .pos-container .pos-payment-card-fields { display: grid; gap: 7px; }
 .pos-container .pos-payment-card-fields > strong { margin-bottom: 0; }
 .pos-container .pos-payment-card-fields label { display: grid; flex: 1; min-width: 0; gap: 4px; color: var(--cart-ink); font-size: 10px; font-weight: 700; }

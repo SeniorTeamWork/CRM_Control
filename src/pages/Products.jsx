@@ -28,6 +28,9 @@ import { reservedQuantities } from "../data/ordersStore";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getSuppliers } from "../supabase/bolimlar/taminotchilar";
 
+const decimalStockUnits = new Set(["metr", "meter", "m", "santimetr", "sm", "cm", "millimetr", "mm", "kilometr", "km", "kilogramm", "kg", "gramm", "g", "milligramm", "mg", "litr", "l", "millilitr", "ml"]);
+const allowsDecimalStock = (unit) => decimalStockUnits.has(String(unit || "").trim().toLocaleLowerCase("uz-UZ"));
+
 export default function Products({ onNavigate }) {
   useUILanguage();
   const modalRoot = document.getElementById("main-modal-root");
@@ -86,10 +89,15 @@ export default function Products({ onNavigate }) {
     });
   const [reservedStock, setReservedStock] = useState(reservedQuantities);
   useEffect(() => {
-    const refresh = () => setReservedStock(reservedQuantities());
-    window.addEventListener("crm-orders-updated", refresh);
+    const refreshProducts = () => {
+      try { const saved = getProducts(null); if (Array.isArray(saved)) setProductList(saved); } catch { /* Keep the current catalog visible if a refresh fails. */ }
+    };
+    const refreshReservations = () => setReservedStock(reservedQuantities());
+    const refresh = () => { refreshProducts(); refreshReservations(); };
+    window.addEventListener("crm-products-updated", refreshProducts);
+    window.addEventListener("crm-orders-updated", refreshReservations);
     window.addEventListener("storage", refresh);
-    return () => { window.removeEventListener("crm-orders-updated", refresh); window.removeEventListener("storage", refresh); };
+    return () => { window.removeEventListener("crm-products-updated", refreshProducts); window.removeEventListener("crm-orders-updated", refreshReservations); window.removeEventListener("storage", refresh); };
   }, []);
 
   const [categoryFilter, setCategoryFilter] = useState({ category: "", product: null, query: "" });
@@ -112,6 +120,7 @@ export default function Products({ onNavigate }) {
 
   const emptyForm = {
     measurementType: "",
+    measurementUnit: "",
     supplierId: "",
     supplierName: "",
     name: "",
@@ -209,6 +218,7 @@ export default function Products({ onNavigate }) {
 
       setFormData({
         measurementType: product.measurementType || "",
+        measurementUnit: product.measurementUnit || "",
         supplierId: product.supplierId || "",
         supplierName: product.supplierName || "",
         name:
@@ -271,7 +281,7 @@ export default function Products({ onNavigate }) {
 
     const stockNum =
       Number(formData.stock) || 0;
-    if (!Number.isFinite(stockNum) || stockNum < 0 || (formData.measurementType === "count" && !Number.isInteger(stockNum))) {
+    if (!Number.isFinite(stockNum) || stockNum < 0 || (formData.measurementType === "count" && !allowsDecimalStock(formData.measurementUnit) && !Number.isInteger(stockNum))) {
       error("Qoldiqni tekshiring", "Soni uchun butun son, og'irligi uchun musbat miqdor kiriting.");
       return;
     }
@@ -694,11 +704,12 @@ export default function Products({ onNavigate }) {
                         <span className="text-sm font-medium text-primary-color">
                           {
                             tx(product.stock)
-                          }{tx(product.measurementType === "weight" ? " kg" : product.measurementType === "count" ? " dona" : "")}
+                          }{tx(product.measurementUnit ? ` ${product.measurementUnit}` : product.measurementType === "weight" ? " kg" : product.measurementType === "count" ? " dona" : "")}
                         </span>
 
                       </div>
-                      {reserved > 0 && <span className="text-xs font-semibold" style={{ color: "var(--warning)" }}>{tx("Band qilingan")}: {tx(reserved)} {tx(product.measurementType === "weight" ? "kg" : "dona")}</span>}
+                      {reserved > 0 && <span className="text-xs font-semibold" style={{ color: "var(--warning)" }}>{tx("Band qilingan")}: {tx(reserved)} {tx(product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"))}</span>}
+                      {Number(product.defectiveStock || 0) > 0 && <span className="text-xs font-semibold" style={{ color: "var(--danger)" }}>{tx("Brak")}: {tx(product.defectiveStock)} {tx(product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"))}</span>}
                       </div>
 
                     </td>
@@ -1027,14 +1038,14 @@ export default function Products({ onNavigate }) {
                 <div>
 
                   <label className="block text-xs font-semibold mb-1.5 text-secondary-color">
-                    {tx(formData.measurementType === "weight" ? "Og'irligi (kg)" : formData.measurementType === "count" ? "Soni (dona)" : "Qoldiq")}
+                    {tx(formData.measurementUnit ? `Qoldiq (${formData.measurementUnit})` : formData.measurementType === "weight" ? "Og'irligi (kg)" : formData.measurementType === "count" ? "Soni (dona)" : "Qoldiq")}
                   </label>
 
                   <input
                     type="number"
                     required
                     min="0"
-                    step={formData.measurementType === "count" ? "1" : "any"}
+                    step={formData.measurementType === "count" && !allowsDecimalStock(formData.measurementUnit) ? "1" : "any"}
                     value={
                       formData.stock
                     }

@@ -19,8 +19,10 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
+  ComposedChart,
+  Area,
+  Line,
+  Legend,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -34,8 +36,8 @@ import { readFinanceOperations, saveFinanceOperations } from "../data/financeSto
 import { readDebtPayments, readPosSales, withDebtBalance } from "../data/debtPayments";
 import { downloadCsv } from "../utils/csv";
 
-import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { getData } from "../supabase/db";
+import { formatCurrency, moneyInputValue, toBaseMoney, toDisplayMoney, currencyLabel } from "../data/currency";
+import { getData, useDataVersion } from "../supabase/db";
 const readBusinessList = (key) => {
   try {
     const value = getData(key, []);
@@ -46,7 +48,7 @@ const readBusinessList = (key) => {
 };
 const readSupplierOrders = () => {
   try {
-    return Object.keys(localStorage).filter((key) => key.startsWith("crm_supplier_orders_")).flatMap((key) => readBusinessList(key));
+    return readBusinessList("crm_suppliers").flatMap((supplier) => readBusinessList(`crm_supplier_orders_${supplier.id}`));
   } catch { return []; }
 };
 
@@ -55,7 +57,16 @@ const isoDate = (value) => {
   return Number.isNaN(date.getTime()) ? new Date().toISOString().slice(0, 10) : date.toISOString().slice(0, 10);
 };
 
-const fmt = (n) => (n / 1000000).toFixed(1) + " mln";
+const formatChartAmount = (amount) => {
+  const value = toDisplayMoney(amount);
+  const magnitude = Math.abs(value);
+  const units = [[1e12, "trln", "трлн"], [1e9, "mlrd", "млрд"], [1e6, "mln", "млн"], [1e3, "ming", "тыс."]];
+  const unit = units.find(([scale]) => magnitude >= scale);
+  if (!unit) return formatCurrency(amount);
+  const [scale, uz, ru] = unit;
+  const suffix = currencyLabel() === "сум" ? ru : uz;
+  return (value / scale).toLocaleString(undefined, {maximumFractionDigits: 2 }) + " " + suffix;
+};
 
 const CustomBarTooltip = ({ active, payload, label }) => {
   useUILanguage();
@@ -86,9 +97,12 @@ const CustomBarTooltip = ({ active, payload, label }) => {
 };
 
 export default function Finance() {
-  useUILanguage();
+  useDataVersion();
+  const supplierReturns = readBusinessList("crm_supplier_returns");
+  const { lang } = useUILanguage();
   const modalRoot = document.getElementById("main-modal-root");
   const modalDialogRef = useRef(null);
+  const [chartPeriod, setChartPeriod] = useState(7);
   const [activeTab, setActiveTab] = useState("all"); // "all" | "income" | "expense"
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState("expense"); // "income" yoki "expense"
@@ -153,26 +167,35 @@ export default function Finance() {
     date: isoDate(sale.createdAt || sale.date), employee: "Tizim", description: `${sale.customer} — savdo to'lovi`, automatic: true, type: "income",
   })).concat(payments.filter((payment) => Number(payment.amount || 0) > 0).map((payment) => ({
     id: `payment-${payment.id || `${payment.saleId}-${payment.createdAt}`}`, category: "Qarz to'lovi", amount: Number(payment.amount || 0),
-    date: isoDate(payment.createdAt || payment.date), employee: "Tizim", description: `${payment.customerName || "Mijoz"} — qarz to'lovi`, automatic: true, type: "income",
+    date: isoDate(payment.createdAt || payment.date), employee: "Tizim", description: `${payment.customerName || tx("Mijoz")} — qarz to'lovi`, automatic: true, type: "income",
   })));
-  const automaticExpenses = approvedReturns.filter((item) => Number(item.amount || 0) > 0).map((item) => ({
-    id: `return-${item.id}`, category: "Qaytarish", amount: Number(item.amount || 0),
-    date: isoDate(item.createdAt || item.date), employee: "Tizim", description: `${item.productName || item.product || "Mahsulot"} — qaytarildi`, automatic: true, type: "expense",
-  })).concat(supplierOrders.map((order) => {
-    const total = Number(order.amount || 0), remaining = Math.max(0, Number(order.remaining ?? (order.status === "debt" ? total : 0))), paid = order.status === "paid" ? total : Math.max(0, total - remaining);
+  const automaticExpenses = supplierOrders.map((order) => {
+    const total = Number(order.amount || 0), remaining = Math.max(0, Number(order.remaining ?? (order.status === "debt" ? total : 0))), paid = Array.isArray(order.paymentHistory) ? order.paymentHistory.reduce((sum,payment) => sum + Number(payment.amount || 0),0) : order.status === "paid" ? total : Math.max(0, total - remaining);
     const supplier = suppliers.find((item) => String(item.id) === String(order.supplierId));
     return { id: `purchase-${order.supplierId}-${order.id}`, category: "Mahsulot xaridi", amount: paid, date: isoDate(order.date), employee: "Tizim", description: `${supplier?.name || "Ta'minotchi"} — mahsulot xaridi`, automatic: true, type: "expense" };
-  }).filter((item) => item.amount > 0));
-  const allIncomes = [...automaticIncomes, ...incomes.map((item, index) => ({ ...item, id: `income-${index}`, type: "income" }))];
+  }).filter((item) => item.amount > 0);
+  const supplierRefunds = supplierReturns.filter(r => r.version === 2 && Number(r.refundedAmount) > 0).map(r => ({ id: `supplier-refund-${r.id}`, category: "Ta’minotchidan qaytgan pul", amount: Number(r.refundedAmount), date: isoDate(r.returnedAt), employee: "Tizim", description: `${r.supplierName} — ${r.productName} · ${tx("Qaytarildi")}`, automatic: true, type: "income" }));
+  const customerReturnAdjustments = approvedReturns.filter((item) => Number(item.amount || 0) > 0).map((item) => ({
+    id: `customer-return-${item.id}`, category: "Mijoz qaytargan tovar", amount: -Number(item.amount || 0),
+    date: isoDate(item.date || item.createdAt), employee: "Tizim", description: `${item.customer || tx("Mijoz")} — ${item.product || tx("Mahsulot")} · ${tx("Qaytarildi")}`, automatic: true, type: "income",
+  }));
+  const allIncomes = [...supplierRefunds, ...automaticIncomes, ...customerReturnAdjustments, ...incomes.map((item, index) => ({ ...item, id: `income-${index}`, type: "income" }))];
   const allExpenses = [...automaticExpenses, ...expenses.map((item, index) => ({ ...item, id: `expense-${index}`, type: "expense" }))];
   const totalIncomeValue = allIncomes.reduce((total, item) => total + Number(item.amount || 0), 0);
   const totalExpenseValue = allExpenses.reduce((total, item) => total + Number(item.amount || 0), 0);
   const totalDebtValue = sales.reduce((total, sale) => total + Math.max(0, Number(sale.debtBalance || 0) - Number(returnAmountBySale[String(sale.id)] || 0)), 0);
   const monthlyData = (() => {
     const grouped = {};
+    const end = new Date();
+    for (let offset = chartPeriod - 1; offset >= 0; offset -= 1) {
+      const day = new Date(end);
+      day.setUTCDate(end.getUTCDate() - offset);
+      const date = isoDate(day);
+      grouped[date] = { date, revenue: 0, expenses: 0 };
+    }
     [...allIncomes, ...allExpenses].forEach((item) => {
-      const date = item.date || isoDate();
-      if (!grouped[date]) grouped[date] = { date, revenue: 0, profit: 0, expenses: 0 };
+      const date = isoDate(item.date);
+      if (!grouped[date]) return;
       if (item.type === "income") grouped[date].revenue += Number(item.amount || 0);
       else grouped[date].expenses += Number(item.amount || 0);
     });
@@ -411,8 +434,13 @@ export default function Finance() {
               color: "var(--text-primary)",
             }}
           >{tx("Oylik moliyaviy ko'rsatkichlar")}</h2>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart
+          <div className="flex flex-wrap gap-1 mb-3 justify-end">
+            {[[7, "7 kun", "7 дней"], [30, "30 kun", "30 дней"], [90, "3 oy", "3 месяца"], [365, "1 yil", "1 год"]].map(([days, uz, ru]) => (
+              <button key={days} type="button" aria-pressed={chartPeriod === days} onClick={() => setChartPeriod(days)} className="rounded-lg px-3 py-1 text-xs font-semibold" style={{ background: chartPeriod === days ? "var(--brand-light)" : "var(--surface-2)", color: chartPeriod === days ? "var(--brand)" : "var(--text-muted)" }}>{lang === "ru" ? ru : uz}</button>
+            ))}
+          </div>
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart
               data={monthlyData}
               margin={{ top: 15, right: 10, bottom: 0, left: 10 }}
             >
@@ -421,42 +449,31 @@ export default function Finance() {
                 stroke="var(--border-subtle)"
                 vertical={false}
               />
-              <XAxis tickFormatter={(value) => tx(value)}
+              <XAxis minTickGap={20} tickFormatter={(value) => value.slice(5).split("-").reverse().join(".")}
                 dataKey="date"
                 tick={{ fontSize: 11, fill: "var(--text-faint)" }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
-                tickFormatter={(v) => formatCurrency(v)}
+                tickFormatter={formatChartAmount}
                 tick={{ fontSize: 11, fill: "var(--text-faint)" }}
                 axisLine={false}
                 tickLine={false}
                 width={65}
               />
               <Tooltip content={<CustomBarTooltip />} />
-              <Bar
-                dataKey="revenue"
-                name={tx("Daromad")}
-                fill="var(--brand)"
-                radius={[4, 4, 0, 0]}
-                opacity={0.85}
-              />
-              <Bar
-                dataKey="profit"
-                name={tx("Foyda")}
-                fill="var(--success)"
-                radius={[4, 4, 0, 0]}
-                opacity={0.85}
-              />
-              <Bar
-                dataKey="expenses"
-                name={tx("Xarajatlar")}
-                fill="var(--warning)"
-                radius={[4, 4, 0, 0]}
-                opacity={0.85}
-              />
-            </BarChart>
+              <defs>
+                <linearGradient id="financeRevenueFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--brand)" stopOpacity={0.22} />
+                  <stop offset="100%" stopColor="var(--brand)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Legend iconType="circle" />
+              <Area type="monotone" dataKey="revenue" name={tx("Daromad")} stroke="var(--brand)" strokeWidth={2} fill="url(#financeRevenueFill)" dot={chartPeriod === 7} />
+              <Line type="monotone" dataKey="profit" name={tx("Foyda")} stroke="var(--success)" strokeWidth={2} dot={chartPeriod === 7} />
+              <Line type="monotone" dataKey="expenses" name={tx("Xarajatlar")} stroke="var(--warning)" strokeWidth={2} strokeDasharray="4 4" dot={chartPeriod === 7} />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 
@@ -513,7 +530,7 @@ export default function Finance() {
                   className="text-xs font-semibold"
                   style={{ color: "var(--text-primary)" }}
                 >
-                  {tx(fmt(cat.value))}
+                  {formatCurrency(cat.value)}
                 </span>
               </div>
             ))}

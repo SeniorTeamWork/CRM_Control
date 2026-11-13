@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { FilePenLine, Plus, Search, Pin, Trash2, Check, Pencil, ArrowLeft, ShoppingCart, Play, Save } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { FilePenLine, Plus, Search, Pin, Trash2, Check, Pencil, ArrowLeft, ShoppingCart, Play } from "lucide-react";
 import { translateText as tx } from "../locales/translateText";
 import { useLanguage } from "../context/LanguageContext";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -24,8 +24,6 @@ export default function Drafts({ onBack, onNavigate }) {
   const [deleting, setDeleting] = useState(null);
   const [deletingSale, setDeletingSale] = useState(null);
   const [saleMode, setSaleMode] = useState(false);
-  const [canSaveTemporarily, setCanSaveTemporarily] = useState(false);
-  const saleSaveActionRef = useRef(null);
   const toast = useToast();
   useEffect(() => {
     const refresh = () => setSaleDrafts(readSavedSaleDrafts());
@@ -65,9 +63,9 @@ export default function Drafts({ onBack, onNavigate }) {
     else setEditor(null);
   };
   if (saleMode) return <section className="drafts-page draft-sale-page">
-    <div className="draft-sale-topbar"><button className="app-back-button" onClick={() => setSaleMode(false)}><ArrowLeft size={16}/>{tx("Qoralamalarga qaytish")}</button><button className="draft-sale-save-button" disabled={!canSaveTemporarily} title={tx(canSaveTemporarily ? "Savat va mijoz ma'lumotlarini vaqtincha saqlash" : "Mahsulot, mijoz ismi va telefon raqamini kiriting")} onClick={() => saleSaveActionRef.current?.()}><Save size={17}/>{tx("Vaqtincha saqlash")}</button></div>
+    <div className="draft-sale-topbar"><button className="app-back-button" onClick={() => setSaleMode(false)}><ArrowLeft size={16}/>{tx("Orqaga")}</button></div>
     <div className="draft-sale-content app-pos-content">
-      <PosWorkspace workspaceKey={DRAFT_POS_WORKSPACE} draftKeyPrefix={DRAFT_POS_PREFIX} migrateLegacyDraft={false} singleSaleMode saveDraftActionRef={saleSaveActionRef} onSaveAvailabilityChange={setCanSaveTemporarily} onSaleDraftSaved={() => setSaleMode(false)}/>
+      <PosWorkspace workspaceKey={DRAFT_POS_WORKSPACE} draftKeyPrefix={DRAFT_POS_PREFIX} migrateLegacyDraft={false}/>
     </div>
   </section>;
   if (editor) return <section className="drafts-page draft-detail">

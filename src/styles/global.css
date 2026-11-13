@@ -1158,3 +1158,121 @@ body {
     max-width: calc(100vw - 24px) !important;
   }
 }
+
+/* ── CRM-wide layout consistency ─────────────────────────── */
+:root {
+  --bg: #f5f7fb;
+  --surface-2: #f8faff;
+  --input-bg: #f6f8fc;
+  --border: #e3e8f1;
+  --border-subtle: #edf1f7;
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, .035);
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, .045);
+  --shadow-md: 0 8px 22px rgba(15, 23, 42, .075);
+}
+
+[data-theme="dark"] {
+  --bg: #0b1120;
+  --surface-2: #0f172a;
+  --input-bg: #0f172a;
+  --border: #243047;
+  --border-subtle: #1b263a;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .12);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .16);
+  --shadow-md: 0 8px 22px rgba(0, 0, 0, .22);
+}
+
+.app-main-view {
+  min-width: 0;
+  background: var(--bg);
+  scrollbar-gutter: stable;
+}
+
+.app-page-content {
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.app-page-content-fluid {
+  max-width: none;
+  margin-inline: 0;
+}
+
+.app-page-content :is(h1, .page-title) {
+  color: var(--text-primary);
+  font-weight: 750;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+}
+
+.app-page-content :is(h2, .section-title) {
+  color: var(--text-primary);
+  font-weight: 680;
+  letter-spacing: -.015em;
+  line-height: 1.3;
+}
+
+.app-page-content .card {
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+
+.app-page-content .card:hover {
+  border-color: color-mix(in srgb, var(--brand) 16%, var(--border));
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+.app-page-content .card-flat {
+  border-color: var(--border);
+}
+
+main.app-main-view:not(.app-pos-main) {
+  padding: clamp(14px, 1.7vw, 26px);
+}
+
+.input-base,
+.btn-primary,
+.btn-ghost {
+  min-width: 0;
+  border-radius: 10px;
+}
+
+.input-base {
+  min-height: 42px;
+}
+
+.btn-primary,
+.btn-ghost {
+  min-height: 40px;
+  justify-content: center;
+}
+
+.btn-primary:disabled,
+.btn-ghost:disabled,
+.input-base:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.input-base:focus-visible,
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  main.app-main-view:not(.app-pos-main) {
+    padding: 14px !important;
+  }
+
+  .app-page-content,
+  .app-page-content-fluid {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+}

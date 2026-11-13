@@ -50,7 +50,7 @@ export function DebtPaymentModal({ sale, paymentAmount, setPaymentAmount, method
               className="input-base"
               style={{ paddingRight: 54 }}
               inputMode="decimal"
-              value={moneyInputValue(paymentAmount, false)}
+              value={moneyInputValue(paymentAmount, true)}
               onChange={(event) => setPaymentAmount(String(Math.min(sale.debtBalance, toBaseMoney(event.target.value))))}
               placeholder="0"
               disabled={completed}

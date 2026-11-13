@@ -40,8 +40,56 @@
 .product-quick-backdrop button:focus-visible { outline: 2px solid var(--text-muted); outline-offset: 3px; }
 @media (max-width: 640px) { .product-quick-backdrop { padding: 16px !important; } .product-quick-header { padding: 20px; } .product-quick-body { padding: 0 20px 20px; grid-template-columns: minmax(0, 1fr); gap: 20px; } .product-quick-body > * { grid-column: 1; grid-row: auto; } .product-quick-footer { padding: 16px 20px; } .product-quick-footer button { flex: 1; padding: 10px; } }
 
-.product-quick-footer { align-items: center; flex-wrap: wrap; }
-.product-quick-footer .product-quick-quantity { display: grid; gap: 6px; background: transparent; padding: 0; margin-right: auto; width: 200px; }
+.product-quick-footer { align-items: flex-end; flex-wrap: wrap; }
+.product-quick-footer .product-quick-quantity { display: grid; align-content: end; gap: 4px; background: transparent; padding: 0; margin-right: auto; width: 140px; flex: 0 0 auto; }
+.product-quick-footer .product-quick-quantity label { margin: 0; white-space: nowrap; font-size: 12px; }
 .product-quick-footer .product-quick-quantity > small { display: none; }
+.product-quick-footer .product-quick-stepper { width: 140px; height: 44px; box-sizing: border-box; grid-template-columns: 30px minmax(0, 1fr) 30px; padding: 2px; }
+.product-quick-footer .product-quick-stepper button { width: 30px; height: 38px; min-height: 0; padding: 0; }
+.product-quick-footer .product-quick-stepper input { height: 38px; font-size: 16px; }
 .product-quick-body .product-quick-total { grid-row: 1 / 3; align-self: end; }
-@media (max-width: 640px) { .product-quick-footer .product-quick-quantity { width: 100%; margin: 0; } .product-quick-footer .product-quick-stepper { max-width: 240px; } .product-quick-body .product-quick-total { grid-row: auto; } }
+@media (max-width: 640px) { .product-quick-footer .product-quick-quantity { width: 100%; justify-content: space-between; margin: 0; } .product-quick-footer .product-quick-stepper { width: 140px; max-width: 55%; } .product-quick-body .product-quick-total { grid-row: auto; } }
+
+.product-quick-defect-section { grid-column: 1 / -1; grid-row: 3; min-width: 0; }
+.product-quick-defect-list { display: grid; gap: 8px; max-height: 250px; overflow-y: auto; }
+.product-quick-defect-option { display: grid; gap: 8px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--surface); }
+.product-quick-defect-option-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.product-quick-defect-option-head > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.product-quick-defect-option-head > div:first-child strong { font-size: 12px; overflow-wrap: anywhere; }
+.product-quick-defect-option-head > div:first-child small { color: var(--text-muted); font-size: 11px; }
+.product-quick-defect-empty { margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 12px; color: var(--text-muted); font-size: 12px; }
+.product-quick-defect-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--input-bg); }
+.product-quick-defect-info { display: grid; gap: 3px; min-width: 0; }
+.product-quick-defect-info strong { font-size: 12px; }
+.product-quick-defect-info span { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.product-quick-defect-info small { color: var(--text-muted); font-size: 11px; }
+.product-quick-defect-buy { display: grid; justify-items: end; gap: 6px; flex: 0 0 auto; }
+.product-quick-defect-buy > strong { color: var(--brand); font-size: 13px; font-variant-numeric: tabular-nums; }
+.product-quick-defect-actions { display: flex; align-items: center; gap: 8px; }
+.product-quick-defect-stepper { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; align-items: center; width: 136px; height: 42px; padding: 2px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-sizing: border-box; }
+.product-quick-defect-stepper:focus-within { border-color: var(--text-faint); box-shadow: 0 0 0 3px var(--border-subtle); }
+.product-quick-defect-stepper button { width: 32px; height: 36px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--brand); cursor: pointer; }
+.product-quick-defect-stepper button:disabled { color: var(--text-faint); cursor: not-allowed; }
+.product-quick-defect-stepper input { min-width: 0; width: 100%; height: 36px; padding: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); text-align: center; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .product-quick-defect-section { grid-column: 1; grid-row: auto; } .product-quick-defect-row { align-items: flex-start; flex-direction: column; } .product-quick-defect-buy { width: 100%; justify-items: stretch; } .product-quick-defect-option-head { align-items: flex-start; } }
+
+.product-quick-defect-option { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+.product-quick-defect-info { display: grid; gap: 4px; min-width: 0; }
+.product-quick-defect-info strong { font-size: 12px; }
+.product-quick-defect-info span { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.product-quick-defect-info small { color: var(--text-muted); font-size: 11px; }
+.product-quick-defect-buy { display: flex; align-items: center; gap: 12px; }
+.product-quick-defect-buy > strong { color: var(--brand); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.product-quick-defect-stepper { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; align-items: center; width: 112px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-sizing: border-box; }
+.product-quick-defect-stepper:focus-within { border-color: var(--text-faint); box-shadow: 0 0 0 3px var(--border-subtle); }
+.product-quick-defect-stepper button { width: 32px; height: 32px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--brand); cursor: pointer; }
+.product-quick-defect-stepper button:disabled { color: var(--text-faint); cursor: not-allowed; }
+.product-quick-defect-stepper input { min-width: 0; width: 100%; height: 32px; padding: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); text-align: center; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .product-quick-defect-section { grid-column: 1; grid-row: auto; } .product-quick-defect-option { grid-template-columns: minmax(0, 1fr); align-items: stretch; } .product-quick-defect-buy { justify-content: space-between; } }
+
+.product-quick-footer.has-defect-quantities .product-quick-quantity { margin-right: 0; }
+.product-quick-defect-quantity-list { display: flex; align-items: flex-end; gap: 10px; min-width: 0; max-width: min(360px, 38vw); overflow-x: auto; margin-right: auto; padding: 0 2px 2px; }
+.product-quick-defect-quantity { display: grid; align-content: end; gap: 4px; width: 112px; flex: 0 0 112px; }
+.product-quick-defect-quantity label { overflow: hidden; color: var(--text-primary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.product-quick-defect-quantity .product-quick-defect-stepper { width: 112px; }
+@media (max-width: 640px) { .product-quick-defect-quantity-list { order: 3; width: 100%; max-width: 100%; margin: 0; } .product-quick-defect-quantity { flex-basis: 112px; } }

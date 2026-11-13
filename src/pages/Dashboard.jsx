@@ -57,12 +57,13 @@ export default function Dashboard({
     const soldCost = sale.items?.length
       ? sale.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(productCosts.get(String(item.id)) || 0), 0)
       : (sale.productIds || []).reduce((sum, productId) => sum + Number(productCosts.get(String(productId)) || 0), 0);
-    const returnedCost = returnedItems.reduce((sum, item) => sum + Number(item.quantity || 1) * Number(productCosts.get(String(item.productId)) || 0), 0);
+    const returnedCost = returnedItems.reduce((sum, item) => sum + Number(item.quantity || 1) * Number(item.unitCost ?? productCosts.get(String(item.productId)) ?? 0), 0);
     return {
       ...sale,
       returnedAmount,
       netAmount: Math.max(0, Number(sale.amount || 0) - returnedAmount),
       netDebt: Math.max(0, Number(sale.debtBalance || 0) - returnedAmount),
+      grossCost: soldCost,
       netCost: Math.max(0, soldCost - returnedCost),
     };
   });
@@ -73,12 +74,12 @@ export default function Dashboard({
     const date = new Date(sale.createdAt || sale.date);
     return !Number.isNaN(date.getTime()) && date.toDateString() === today;
   };
-  const todaySales = liveSales
-    .filter(isToday)
-    .reduce((sum, sale) => sum + Number(sale.netAmount || 0), 0);
-  const todayProfit = liveSales
-    .filter(isToday)
-    .reduce((sum, sale) => sum + Math.max(0, Number(sale.netAmount || 0) - Number(sale.netCost || 0)), 0);
+  const todayReturns = dashboardReturns.filter((item) => item.status === "approved" && isToday({ date: item.date || item.createdAt }));
+  const todaySales = liveSales.filter(isToday).reduce((sum, sale) => sum + Number(sale.amount || 0), 0)
+    - todayReturns.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const todayReturnedCost = todayReturns.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitCost ?? productCosts.get(String(item.productId)) ?? 0), 0);
+  const todayCost = liveSales.filter(isToday).reduce((sum, sale) => sum + Number(sale.grossCost || 0), 0);
+  const todayProfit = todaySales - (todayCost - todayReturnedCost);
   const customerDebt = liveSales.reduce((sum, sale) => sum + Number(sale.netDebt || 0), 0);
   const supplierDebt = dashboardSuppliers.reduce((sum, supplier) => sum + Number(supplier.debt || 0), 0);
   const asMoney = (amount) => formatCurrency(amount);
@@ -101,13 +102,13 @@ export default function Dashboard({
     const customerSales = allDashboardSales.filter(
       (item) => String(item.customer || "").trim().toLowerCase() === customerName.toLowerCase()
     );
-    const debt = customerSales.reduce((sum, item) => sum + Number(item.debtBalance || 0), 0);
+    const debt = customerSales.reduce((sum, item) => sum + Number(item.netDebt ?? item.debtBalance ?? 0), 0);
     const saleCustomer = {
       name: customerName,
       phone: "—",
       region: "—",
       purchases: customerSales.length,
-      spent: customerSales.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      spent: customerSales.reduce((sum, item) => sum + Number(item.netAmount ?? item.amount ?? 0), 0),
       debt,
       lastPurchase: sale.date,
       status: debt > 0 ? "debtor" : "regular",
@@ -165,7 +166,7 @@ export default function Dashboard({
      CHART DATA
   ===================================================== */
 
-  const data = buildSalesChart(liveSales, range);
+  const data = buildSalesChart(liveSales, range, new Date(), dashboardReturns, productCosts);
 
   /* =====================================================
      RANGE
@@ -1123,7 +1124,9 @@ export default function Dashboard({
                               "var(--text-primary)",
                           }}
                         >
-                          {formatCurrency(sale.amount)}</td>
+                          <div>{formatCurrency(sale.netAmount ?? sale.amount)}</div>
+                          {sale.returnedAmount > 0 && <small style={{ display: "block", marginTop: 3, color: "var(--danger)" }}>{tx("Qaytarildi")}: − {formatCurrency(sale.returnedAmount)}</small>}
+                        </td>
 
                         <td
                           className="px-5 py-3 text-xs"

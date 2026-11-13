@@ -20,11 +20,12 @@ export function sectionForPage(page) {
   if (page === "help" || page === "notifications") return null;
   if (page.startsWith("customer-")) return "customers";
   if (page.startsWith("product-")) return "products";
+  if (page === "suppliers-returns") return "suppliers";
   if (page.startsWith("supplier-")) return "suppliers";
   if (page.startsWith("employee-")) return "employees";
   if (page.startsWith("debt-")) return "finance";
   if (page.startsWith("sales-")) return "sales";
-  if (page === "orders") return "orders";
+  if (page === "orders" || page === "pending-pickups") return "orders";
   if (page.startsWith("products-")) return "products";
   if (page.startsWith("customers-")) return "customers";
   if (page.startsWith("finance-")) return "finance";
@@ -33,6 +34,7 @@ export function sectionForPage(page) {
 
 export function canAccess(user, page) {
   if (!user) return false;
+  if (page === "defective-products") return true;
   if (user.type === "director") return true;
   const section = sectionForPage(page);
   return !section || user.permissions?.includes(section);

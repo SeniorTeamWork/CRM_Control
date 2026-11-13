@@ -118,6 +118,7 @@ export const customerFromRow = (row, ctx) => {
 
 export const saleToRow = (s, w) => {
   const items = arr(s.items);
+  const deliveryAddresses = arr(s.deliveryAddresses);
   const itemsTotal = items.reduce((sum, item) => sum + num(item.total, num(item.price) * num(item.qty)), 0);
   const amount = money(s.amount ?? s.total ?? itemsTotal);
   const subtotal = Math.max(amount, money(s.subtotal ?? amount + money(s.discountAmount)));
@@ -137,7 +138,7 @@ export const saleToRow = (s, w) => {
     qarz_muddati: dayOnly(s.debtDueDate),
     yetkazish_manzili: text(s.deliveryAddress),
     sana: isoDate(s.date ?? s.createdAt) || new Date().toISOString(),
-    yetkazish_manzillari: arr(s.deliveryAddresses),
+    yetkazish_manzillari: deliveryAddresses,
     mahsulotlar: items.map((item, index) => ({
       id: index + 1,
       nomi: item.name || "Mahsulot",
@@ -146,6 +147,11 @@ export const saleToRow = (s, w) => {
       jami: money(item.total ?? num(item.price) * num(item.qty)),
       tannarx: money(w.costOf(item.id)),
       manzil: text(item.deliveryAddress),
+      addressId: item.addressId || "",
+      deliveryDate: item.deliveryDate || "",
+      deliveryStatus: item.deliveryStatus || "",
+      deliveredAt: item.deliveredAt || "",
+      ...(item.isDefectSale || item.defectId ? { isDefectSale: true, defectId: item.defectId, defectStatus: item.defectStatus, defectReason: item.defectReason } : {}),
       mahsulot_id: ref("mahsulotlar", item.id),
     })),
     buyurtma_id: ref("buyurtmalar", s.sourceOrderId),
@@ -156,14 +162,26 @@ export const saleFromRow = (row, ctx) => {
   const amount = num(row.jami_summa, num(row.oraliq_summa) - num(row.chegirma_summa));
   const paid = num(row.tolangan_summa);
   const debt = Math.max(0, amount - paid);
-  const items = arr(row.mahsulotlar).map((item) => ({
-    id: ctx.appIdOf("mahsulotlar", item.mahsulot_id) ?? item.id,
-    name: item.nomi,
-    price: num(item.narx),
-    qty: num(item.soni),
-    total: num(item.jami),
-    deliveryAddress: item.manzil || undefined,
-  }));
+  const deliveryAddresses = arr(row.yetkazish_manzillari);
+  const items = arr(row.mahsulotlar).map((item) => {
+    const itemAddressId = item.addressId || "";
+    const itemAddress = deliveryAddresses.find((address) => itemAddressId && String(address?.id) === String(itemAddressId))
+      || deliveryAddresses.find((address) => address?.address && address.address === item.manzil)
+      || (deliveryAddresses.length === 1 ? deliveryAddresses[0] : null);
+    return {
+      id: ctx.appIdOf("mahsulotlar", item.mahsulot_id) ?? item.id,
+      name: item.nomi,
+      price: num(item.narx),
+      qty: num(item.soni),
+      total: num(item.jami),
+      deliveryAddress: item.manzil || itemAddress?.address || undefined,
+      addressId: itemAddressId || itemAddress?.id || undefined,
+      deliveryDate: item.deliveryDate || itemAddress?.deliveryDate || "",
+      deliveryStatus: item.deliveryStatus || "",
+      deliveredAt: item.deliveredAt || "",
+      ...(item.isDefectSale || item.defectId ? { isDefectSale: true, defectId: item.defectId, defectStatus: item.defectStatus, defectReason: item.defectReason } : {}),
+    };
+  });
   return merge({
     id: row.ilova_id || row.id,
     receiptNumber: row.chek_raqami || row.id,

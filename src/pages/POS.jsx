@@ -36,7 +36,7 @@ import { useToast } from "../context/ToastContext";
 import checkAnimationSound from "../assets/check animation sound.m4a";
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { removeOrder, reservedQuantities as readReservedQuantities } from "../data/ordersStore";
+import { defectReservationKey, removeOrder, reservedQuantitiesByCondition as readReservedQuantitiesByCondition } from "../data/ordersStore";
 import { getData, removeData, setData } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getSuppliers } from "../supabase/bolimlar/taminotchilar";
@@ -44,20 +44,59 @@ const formatUzPhone = (phone) => {
   const digits = String(phone || "").replace(/\D/g, "").slice(-9);
   return [digits.slice(0, 2), digits.slice(2, 5), digits.slice(5, 7), digits.slice(7, 9)].filter(Boolean).join(" ");
 };
+const todayForDateInput = () => {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+};
+
+const isPartiallyWorkingDefect = (defect) => String(defect?.status || "").trim().toLocaleLowerCase("uz-UZ").startsWith("qisman ishlaydi");
+const partialWorkingQuantity = (product) => (Array.isArray(product?.defects) ? product.defects : [])
+  .filter(isPartiallyWorkingDefect)
+  .reduce((sum, defect) => sum + Math.max(0, Number(defect.quantity) || 0), 0);
+const actualDefectiveStock = (product) => Math.max(0, Number(product?.defectiveStock || 0) - partialWorkingQuantity(product));
+
+const defectSaleRows = (product) => {
+  const defects = Array.isArray(product?.defects) ? product.defects : [];
+  const rows = defects.filter((defect) => !isPartiallyWorkingDefect(defect)).map((defect, index) => ({
+    ...product,
+    defectId: String(defect.id || `${product.id}-defect-${index}`),
+    defectLotQuantity: Math.max(0, Number(defect.quantity) || 0),
+    defectStatus: "Brak",
+    defectReason: defect.reason || "",
+    defectPrice: Number(defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
+  })).filter((row) => row.defectLotQuantity > 0);
+  const recordedQuantity = defects.reduce((sum, defect) => sum + Math.max(0, Number(defect.quantity) || 0), 0);
+  const unrecordedQuantity = Math.max(0, Number(product?.defectiveStock || 0) - recordedQuantity);
+  if (unrecordedQuantity > 0) rows.push({
+    ...product,
+    defectId: `${product.id}-defect-unrecorded`,
+    defectLotQuantity: unrecordedQuantity,
+    defectStatus: "Brak",
+    defectReason: "",
+    defectPrice: Number(product.price ?? product.cost ?? 0),
+  });
+  return rows;
+};
+
+const defectQuantityById = (product, defectId) => defectSaleRows(product).find((row) => row.defectId === String(defectId))?.defectLotQuantity || 0;
+const posCartKeyFor = (productId, addressId, defectId) => `${cartKeyFor(productId, addressId)}${defectId ? `::brak:${defectId}` : ""}`;
 
 const capitalizeCustomerName = (name) => String(name || "").trim().replace(/\s+/g, " ").split(" ").map((word) => word ? word[0].toLocaleUpperCase("uz-UZ") + word.slice(1).toLocaleLowerCase("uz-UZ") : "").join(" ");
 
 const readPosCustomerSuggestions = (activeCustomerKey, activeSalesKey, query, selectedPhone) => {
   const normalizedQuery = String(query || "").trim().toLocaleLowerCase("uz-UZ");
   if (!normalizedQuery) return [];
+  const queryPhone = phoneDigits(query);
   const records = [];
-  [activeCustomerKey].forEach((key) => {
+  [...new Set([activeCustomerKey, "crm_customers", "crm_additional_pos_customers"])].forEach((key) => {
+    if (!key) return;
     try {
       const saved = getData(key, []);
       if (Array.isArray(saved)) records.push(...saved);
     } catch {}
   });
-  [activeSalesKey].forEach((key) => {
+  [...new Set([activeSalesKey, "crm_sales", "crm_additional_pos_sales"])].forEach((key) => {
+    if (!key) return;
     try {
       const saved = getData(key, []);
       if (Array.isArray(saved)) records.push(...saved);
@@ -65,26 +104,30 @@ const readPosCustomerSuggestions = (activeCustomerKey, activeSalesKey, query, se
   });
   const unique = new Map();
   records.forEach((record) => {
-    const name = String(record?.name || record?.customerName || record?.customer || "").trim();
-    if (!name || !name.toLocaleLowerCase("uz-UZ").startsWith(normalizedQuery)) return;
-    const phone = phoneDigits(record?.phone || record?.customerPhone);
-    const key = phone || name.toLocaleLowerCase("uz-UZ");
+    const name = String(record?.name || record?.customerName || record?.customer || record?.mijoz_ismi || record?.ism || "").trim();
+    if (!name) return;
+    const phone = phoneDigits(record?.phone || record?.customerPhone || record?.mijoz_telefon || record?.telefon);
+    const normalizedName = name.toLocaleLowerCase("uz-UZ");
+    if (!normalizedName.startsWith(normalizedQuery) && !(queryPhone && phone.startsWith(queryPhone))) return;
+    if (normalizedName === normalizedQuery && (!phone || phone === phoneDigits(selectedPhone))) return;
+    const key = phone || normalizedName;
     if (!unique.has(key)) unique.set(key, { name: capitalizeCustomerName(name), phone });
   });
   const matches = [...unique.values()];
-  if (matches.some((customer) => customer.name.toLocaleLowerCase("uz-UZ") === normalizedQuery && customer.phone && customer.phone === selectedPhone)) return [];
   return matches.sort((a, b) => a.name.localeCompare(b.name, "uz", { sensitivity: "base" })).slice(0, 8);
 };
-export default function POS({ cartWindowOpen = false, onCartWindowChange, draftKey = POS_DRAFT_KEY, onDraftChange, onBusyChange, onSaveSaleDraft, saveDraftActionRef, hideSaveDraftButton = false, draftOpenedAt, salesStorageKey = "crm_sales", customerStorageKey = "crm_customers", salesDocumentType = "sales", currentUser = null, orderMode = false, headingText, initialOrderDraft = null, reservationOrderId = null, onSaveOrder, saveOrderActionRef, onOrderSaveAvailabilityChange, onOrderSaleComplete }) {
+export default function POS({ cartWindowOpen = false, onCartWindowChange, draftKey = POS_DRAFT_KEY, onDraftChange, onBusyChange, onSaveSaleDraft, saveDraftActionRef, hideSaveDraftButton = false, draftOpenedAt, salesStorageKey = "crm_sales", customerStorageKey = "crm_customers", salesDocumentType = "sales", currentUser = null, orderMode = false, headingText, initialOrderDraft = null, reservationOrderId = null, onSaveOrder, saveOrderActionRef, onOrderSaveAvailabilityChange, onOrderSaleComplete, onSaleActionComplete, saleSection = "", saleSectionLabel = null, initialDefectItem = null, onDefectSaleStarted }) {
   useUILanguage();
   const companyName = useTenantCompanyName();
   const { t } = useLanguage();
   const { success, warning } = useToast();
   const draftData = initialOrderDraft || readPosDraft(draftKey);
   const [activeReservationOrderId, setActiveReservationOrderId] = useState(() => reservationOrderId || draftData.sourceOrderId || null);
+  const previousDefectModeRef = useRef(normalizeProductText(saleSection) === "brak");
 
   const text = (key, fallback) =>
     t ? t(`pos.${key}`, fallback) : fallback;
+  const isDefectSale = normalizeProductText(saleSection) === "brak";
 
   /* =====================================================
      PRODUCTS
@@ -95,14 +138,15 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     const saved = getProducts(null);
     return Array.isArray(saved) ? saved : initialProducts;
   });
-  const [reservedStock, setReservedStock] = useState(() => readReservedQuantities(activeReservationOrderId));
+  const [reservedStock, setReservedStock] = useState(() => readReservedQuantitiesByCondition(activeReservationOrderId));
 
   const [categoryFilter, setCategoryFilter] = useState({ category: "", product: null, query: "" });
   useEffect(() => { const refresh = () => { try { const products = getProducts(); if (Array.isArray(products)) setProductList(products); } catch {} }; window.addEventListener("crm-products-updated", refresh); window.addEventListener("storage", refresh); return () => { window.removeEventListener("crm-products-updated", refresh); window.removeEventListener("storage", refresh); }; }, []);
-  useEffect(() => { const refresh = () => setReservedStock(readReservedQuantities(activeReservationOrderId)); refresh(); window.addEventListener("crm-orders-updated", refresh); window.addEventListener("storage", refresh); return () => { window.removeEventListener("crm-orders-updated", refresh); window.removeEventListener("storage", refresh); }; }, [activeReservationOrderId]);
+  useEffect(() => { const refresh = () => setReservedStock(readReservedQuantitiesByCondition(activeReservationOrderId)); refresh(); window.addEventListener("crm-orders-updated", refresh); window.addEventListener("storage", refresh); return () => { window.removeEventListener("crm-orders-updated", refresh); window.removeEventListener("storage", refresh); }; }, [activeReservationOrderId]);
   const [search, setSearch] = useState("");
   const [quickAddProduct, setQuickAddProduct] = useState(null);
   const [quickAddQuantity, setQuickAddQuantity] = useState("1");
+  const [quickAddInitialDefectId, setQuickAddInitialDefectId] = useState(null);
   const [suppliers] = useState(() => {
     try {
       const saved = getSuppliers(null);
@@ -130,20 +174,75 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
   useLayoutEffect(() => {
     if (productsGridRef.current) productsGridRef.current.scrollTop = 0;
-  }, [search, selectedProductSelect, productList.length]);
+  }, [search, selectedProductSelect, productList.length, isDefectSale]);
 
   /* =====================================================
      CART
   ===================================================== */
-  const availableStock = (product) => Math.max(0, Number(product?.stock || 0) - Number(reservedStock[String(product?.id)] || 0));
+  const reservedDefectQuantity = (productId, defectId, reservations = reservedStock) => {
+    const id = String(productId), lots = reservations.defectiveLots || {};
+    const matchingLotQuantity = Number(lots[defectReservationKey(id, defectId)] || 0);
+    const trackedLotQuantity = Object.entries(lots).filter(([key]) => key.startsWith(`${id}::`)).reduce((sum, [, quantity]) => sum + Number(quantity || 0), 0);
+    const unassignedQuantity = Math.max(0, Number(reservations.defective?.[id] || 0) - trackedLotQuantity);
+    return matchingLotQuantity + unassignedQuantity;
+  };
+  const availableDefectStock = (product, defectId, reservations = reservedStock) => Math.max(0, defectQuantityById(product, defectId) - reservedDefectQuantity(product?.id, defectId, reservations));
+  const availableStock = (product) => product?.defectId || isDefectSale
+    ? availableDefectStock(product, product.defectId)
+    : Math.max(0, Number(product?.stock || 0) - actualDefectiveStock(product) - Number(reservedStock.good?.[String(product?.id)] || 0));
+  const findInsufficientCartItem = (items, products, reservations) => {
+    const requested = new Map();
+    items.forEach((item) => {
+      const defective = Boolean(item.isDefectSale || item.defectId), key = JSON.stringify([defective ? "defective" : "good", String(item.id), defective ? String(item.defectId || "") : ""]);
+      const entry = requested.get(key) || { ...item, defective, requested: 0 };
+      entry.requested += Number(item.qty || 0);
+      requested.set(key, entry);
+    });
+    return [...requested.values()].find((item) => {
+      const product = products.find((entry) => String(entry.id) === String(item.id));
+      const available = item.defective
+        ? availableDefectStock(product, item.defectId, reservations)
+        : Math.max(0, Number(product?.stock || 0) - actualDefectiveStock(product) - Number(reservations.good?.[String(item.id)] || 0));
+      return item.requested > available;
+    });
+  };
 
   const [cart, setCart] = useState(() => {
     const saved = draftData.cart;
-    return Array.isArray(saved) ? saved : [];
+    if (!Array.isArray(saved)) return [];
+    return isDefectSale ? saved.filter((item) => Boolean(item.isDefectSale && item.defectId)) : saved;
   });
+  const consumedDefectItemKeyRef = useRef(null);
+  useEffect(() => {
+    if (!initialDefectItem) {
+      consumedDefectItemKeyRef.current = null;
+      return;
+    }
+    const defectId = String(initialDefectItem.defectId || "");
+    const product = productList.find((item) => String(item.id) === String(initialDefectItem.productId));
+    const requestKey = `${initialDefectItem.productId}::${defectId}`;
+    if (!defectId || !product || consumedDefectItemKeyRef.current === requestKey) return;
+    consumedDefectItemKeyRef.current = requestKey;
+    setQuickAddProduct(product);
+    // Braklar ro'yxatidan sotuvga o'tilganda oddiy mahsulot miqdori nol bo'lsin;
+    // modal faqat tanlangan brakni savatga qo'shadi.
+    setQuickAddQuantity("0");
+    setQuickAddInitialDefectId(defectId);
+    onDefectSaleStarted?.();
+  }, [initialDefectItem, onDefectSaleStarted, productList]);
 
   const [globalDiscount, setGlobalDiscount] =
     useState(() => Number(draftData.globalDiscount) || 0);
+  useEffect(() => {
+    if (previousDefectModeRef.current === isDefectSale) return;
+    previousDefectModeRef.current = isDefectSale;
+    setCart([]);
+    setGlobalDiscount(0);
+    setCategoryFilter({ category: "", product: null, query: "" });
+    setSearch("");
+    setQuickAddProduct(null);
+    setQuickAddInitialDefectId(null);
+  }, [isDefectSale]);
 
   /* =====================================================
      CUSTOMER
@@ -161,9 +260,11 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const [deliveryAddress, setDeliveryAddress] = useState(() => draftData.deliveryAddress || "");
   const [addresses, setAddresses] = useState(() => {
     const saved = draftData.addresses;
-    return Array.isArray(saved) ? saved : [];
+    return Array.isArray(saved) ? saved.map((address) => ({ ...address, deliveryDate: address.deliveryDate ?? todayForDateInput() })) : [];
   });
-  const [selectedAddressId, setSelectedAddressId] = useState(() => draftData.selectedAddressId || null);
+  const [deliveryDate, setDeliveryDate] = useState(() => draftData.deliveryDate ?? draftData.addresses?.[0]?.deliveryDate ?? todayForDateInput());
+  const [deliveryDateSelected, setDeliveryDateSelected] = useState(false);
+  const [selectedAddressId, setSelectedAddressId] = useState(() => draftData.selectedAddressId || draftData.addresses?.[0]?.id || null);
   const [addressConfirmed, setAddressConfirmed] = useState(() => Boolean(draftData.addressConfirmed));
   const [addressError, setAddressError] = useState("");
 
@@ -193,13 +294,13 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       } else {
         setData(draftKey, {
           cart, globalDiscount, customerName, customerPhone,
-          deliveryAddress, addresses, selectedAddressId, addressConfirmed,
+          deliveryAddress, addresses, deliveryDate, selectedAddressId, addressConfirmed,
           sourceOrderId: activeReservationOrderId,
         });
       }
     } catch { /* The sale can still be completed if browser storage is full. */ }
   },[cart, globalDiscount, customerName, customerPhone, deliveryAddress,
-    addresses, selectedAddressId, addressConfirmed, paymentComplete, draftKey, orderMode, activeReservationOrderId]);
+    addresses, deliveryDate, selectedAddressId, addressConfirmed, paymentComplete, draftKey, orderMode, activeReservationOrderId]);
 
   useEffect(() => { onDraftChange?.({ customerName, customerPhone, count: cart.length }); }, [customerName, customerPhone, cart.length, onDraftChange]);
 
@@ -268,7 +369,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
      FILTER
   ===================================================== */
 
-  const filtered = productList.filter((p) => {
+  const saleProducts = isDefectSale ? productList.flatMap(defectSaleRows) : productList;
+  const filtered = saleProducts.filter((p) => {
     const matchSearch = [p.id, p.sku, p.name, p.category].some((value) => normalizeProductText(value).startsWith(normalizeProductText(search)));
 
     const matchSelect =
@@ -283,12 +385,12 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCart((previous) => previous.map((item) =>
       item.addressId
         ? item
-        : { ...item, addressId, cartKey: cartKeyFor(item.id, addressId) }
+        : { ...item, addressId, cartKey: posCartKeyFor(item.id, addressId, item.defectId) }
     ));
   };
 
   const addDeliveryAddress = (details) => {
-    const newAddress = { id: createAddressId(), ...details };
+    const newAddress = { id: createAddressId(), ...details, deliveryDate: details.deliveryDate ?? todayForDateInput(), deliveryDateConfirmed: Boolean(details.deliveryDateConfirmed) };
     if (addresses.length === 0) {
       const typedAddress = deliveryAddress.trim();
       if (typedAddress) {
@@ -297,6 +399,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
           name: "Asosiy manzil",
           address: typedAddress,
           phone: "",
+          deliveryDate,
+          deliveryDateConfirmed: false,
         };
         setAddresses([primary, newAddress]);
         assignUnassignedItems(primary.id);
@@ -311,6 +415,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
         : addresses;
       setAddresses([...currentAddresses, newAddress]);
     }
+    setDeliveryDate(newAddress.deliveryDate);
     setSelectedAddressId(newAddress.id);
     setAddressConfirmed(false);
     setAddressError("");
@@ -322,8 +427,20 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
         setAddressError("Yetkazib berish manzilini tanlang.");
         return false;
       }
+      const confirmedAddresses = addresses.map((address) => address.id === selectedAddressId
+        ? { ...address, deliveryDateConfirmed: true }
+        : address);
+      setAddresses(confirmedAddresses);
       setAddressError("");
-      setAddressConfirmed(true);
+      const currentIndex = addresses.findIndex((address) => address.id === selectedAddressId);
+      const nextAddress = [...confirmedAddresses.slice(currentIndex + 1), ...confirmedAddresses.slice(0, currentIndex)]
+        .find((address) => !address.deliveryDateConfirmed);
+      if (nextAddress) {
+        setSelectedAddressId(nextAddress.id);
+        setAddressConfirmed(false);
+      } else {
+        setAddressConfirmed(true);
+      }
       return true;
     }
 
@@ -331,7 +448,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     if (addresses.length === 0) {
       if (addressText) {
         const id = createAddressId();
-        setAddresses([{ id, name: "Asosiy manzil", address: addressText, phone: "" }]);
+        setAddresses([{ id, name: "Asosiy manzil", address: addressText, phone: "", deliveryDate, deliveryDateConfirmed: false }]);
         setSelectedAddressId(id);
         assignUnassignedItems(id);
       }
@@ -349,7 +466,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCart((previous) => {
       const item = previous.find((entry) => entry.cartKey === cartKey);
       if (!item || item.addressId === addressId) return previous;
-      const nextKey = cartKeyFor(item.id, addressId);
+    const nextKey = posCartKeyFor(item.id, addressId, item.defectId);
       const existing = previous.find((entry) => entry.cartKey === nextKey);
       if (existing) {
         return previous
@@ -368,64 +485,73 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
      ADD TO CART
   ===================================================== */
 
-  const addToCart = (p, quantity = 1) => {
-    const requested = Math.floor(Number(quantity));
-    if (!Number.isFinite(requested) || requested < 1) return false;
-    if (availableStock(p) <= 0) {
-      warning("Mahsulot tugagan", `${p.name} hozir omborda mavjud emas.`);
-      return false;
-    }
+  const addToCart = (p, quantity = 1, selectedDefects = []) => {
+    const mainQuantity = Math.floor(Number(quantity));
+    const lines = [];
+    if (Number.isFinite(mainQuantity) && mainQuantity > 0) lines.push({ product: p, quantity: mainQuantity });
+    (Array.isArray(selectedDefects) ? selectedDefects : []).forEach(({ product, quantity: defectQuantity }) => {
+      const requested = Math.floor(Number(defectQuantity));
+      if (product && Number.isFinite(requested) && requested > 0) lines.push({ product, quantity: requested });
+    });
+    if (!lines.length) return false;
 
-    const totalInCart = cart
-      .filter((item) => item.id === p.id)
-      .reduce((sum, item) => sum + item.qty, 0);
-    if (totalInCart + requested > availableStock(p)) {
-      warning("Miqdor cheklangan", `${p.name} uchun band qilinmagan mahsulot yetarli emas.`);
-      return false;
-    }
-
-    setCart((prev) => {
-      const addressId = selectedAddressId || addresses[0]?.id || null;
-      const cartKey = cartKeyFor(p.id, addressId);
-      const existing = prev.find(
-        (c) => c.cartKey === cartKey
-      );
-      if (existing) {
-        return prev.map((c) =>
-          c.cartKey === cartKey
-            ? {
-              ...c,
-              qty: c.qty + requested,
-            }
-            : c
-        );
+    for (const line of lines) {
+      const defectLine = Boolean(line.product?.defectId);
+      const available = availableStock(line.product);
+      if (available <= 0) {
+        warning("Mahsulot tugagan", `${line.product.name} hozir omborda mavjud emas.`);
+        return false;
       }
+      const totalInCart = cart
+        .filter((item) => item.id === line.product.id && (defectLine ? item.isDefectSale && item.defectId === line.product.defectId : !item.isDefectSale))
+        .reduce((sum, item) => sum + item.qty, 0);
+      if (totalInCart + line.quantity > available) {
+        warning("Miqdor cheklangan", `${line.product.name} uchun ombordagi qoldiq yetarli emas.`);
+        return false;
+      }
+    }
 
-      return [
-        ...prev,
-        {
-          id: p.id,
+    setCart((previous) => {
+      const addressId = selectedAddressId || addresses[0]?.id || null;
+      return lines.reduce((next, line) => {
+        const item = line.product;
+        const defectLine = Boolean(item.defectId);
+        const cartKey = posCartKeyFor(item.id, addressId, defectLine ? item.defectId : null);
+        const existing = next.find((entry) => entry.cartKey === cartKey);
+        if (existing) {
+          return next.map((entry) => entry.cartKey === cartKey ? { ...entry, qty: entry.qty + line.quantity } : entry);
+        }
+        return [...next, {
+          id: item.id,
           cartKey,
           addressId,
-          name: p.name,
-          price: Number(p.price),
-          image: p.image,
-          qty: requested,
+          name: item.name,
+          price: Number(defectLine ? item.defectPrice : item.price),
+          image: item.image,
+          qty: line.quantity,
           discount: 0,
-        },
-      ];
+          ...(defectLine ? { defectId: item.defectId, defectStatus: item.defectStatus, defectReason: item.defectReason, isDefectSale: true } : {}),
+        }];
+      }, [...previous]);
     });
-    success("Mahsulot qo'shildi", `${p.name} savatchaga ${requested} dona qo'shildi.`);
+    const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+    success("Mahsulot qo'shildi", `${p.name} va tanlangan braklar savatchaga ${itemCount} dona qo'shildi.`);
     return true;
   };
 
   const openQuickAdd = (product) => {
     setQuickAddProduct(product);
     setQuickAddQuantity("1");
+    setQuickAddInitialDefectId(null);
   };
 
-  const confirmQuickAdd = (quantity) => {
-    if (addToCart(quickAddProduct, quantity)) setQuickAddProduct(null);
+  const closeQuickAdd = () => {
+    setQuickAddProduct(null);
+    setQuickAddInitialDefectId(null);
+  };
+
+  const confirmQuickAdd = (quantity, defectLines = []) => {
+    if (addToCart(quickAddProduct, quantity, defectLines)) setQuickAddProduct(null);
   };
 
   /* =====================================================
@@ -438,9 +564,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       if (!current) return previous;
       const product = productList.find((item) => item.id === current.id);
       const otherQty = previous
-        .filter((item) => item.id === current.id && item.cartKey !== cartKey)
+        .filter((item) => item.id === current.id && (current.isDefectSale ? item.defectId === current.defectId : !item.isDefectSale) && item.cartKey !== cartKey)
         .reduce((sum, item) => sum + item.qty, 0);
-      const available = product ? availableStock(product) - otherQty : Infinity;
+      const available = product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
       const nextQty = Math.max(0, Math.min(current.qty + delta, available));
       return previous
         .map((item) => item.cartKey === cartKey ? { ...item, qty: nextQty } : item)
@@ -458,9 +584,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       if (!current) return previous;
       const product = productList.find((item) => item.id === current.id);
       const otherQty = previous
-        .filter((item) => item.id === current.id && item.cartKey !== cartKey)
+        .filter((item) => item.id === current.id && (current.isDefectSale ? item.defectId === current.defectId : !item.isDefectSale) && item.cartKey !== cartKey)
         .reduce((sum, item) => sum + item.qty, 0);
-      const available = product ? availableStock(product) - otherQty : Infinity;
+      const available = product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
       const nextQty = Math.max(0, Math.min(newQty, available));
       return previous
         .map((item) => item.cartKey === cartKey ? { ...item, qty: nextQty } : item)
@@ -489,10 +615,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     if (!/^\d{9}$/.test(phoneDigits(customerPhone))) { setCustomerError("Telefon raqamini 9 ta raqam bilan kiriting."); return false; }
     let products = productList;
     try { const savedProducts = getProducts(null); if (Array.isArray(savedProducts)) products = savedProducts; } catch {}
-    const reservations = readReservedQuantities(activeReservationOrderId);
-    const quantities = cart.reduce((result, item) => { result[String(item.id)] = (result[String(item.id)] || 0) + Number(item.qty || 0); return result; }, {});
-    const insufficient = Object.entries(quantities).find(([id, quantity]) => quantity > Math.max(0, Number(products.find((product) => String(product.id) === id)?.stock || 0) - Number(reservations[id] || 0)));
-    if (insufficient) { setProductList(products); warning("Tovar yetarli emas", "Boshqa buyurtmalarda band qilingan miqdorni tekshiring."); return false; }
+    const reservations = readReservedQuantitiesByCondition(activeReservationOrderId);
+    const insufficient = findInsufficientCartItem(cart, products, reservations);
+    if (insufficient) { setProductList(products); warning("Tovar yetarli emas", `${insufficient.name || "Mahsulot"}: band qilinmagan qoldiqdan ko‘p miqdor kiritildi.`); return false; }
     const now = new Date().toISOString();
     const saved = onSaveOrder?.({
       id: activeReservationOrderId || crypto.randomUUID(),
@@ -506,7 +631,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       discountAmount: discountAmt,
       total: Math.round(total),
       deliveryAddress,
+      deliveryDate,
       addresses,
+      deliveryAddresses: addresses,
       selectedAddressId,
       addressConfirmed,
       employeeId: currentUser?.type === "employee" ? currentUser.id : null,
@@ -521,12 +648,14 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCustomerPhone("");
     setCustomerError("");
     setDeliveryAddress("");
+    setDeliveryDate(todayForDateInput());
     setAddresses([]);
     setSelectedAddressId(null);
     setAddressConfirmed(false);
     setAddressError("");
     setGlobalDiscount(0);
     success("Buyurtma vaqtincha saqlandi", "Mahsulotlar buyurtma uchun band qilindi.");
+    onSaleActionComplete?.("Band qilingan");
     return true;
   };
   if (saveOrderActionRef) saveOrderActionRef.current = requestSaveOrder;
@@ -549,9 +678,11 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       customerPhone,
       globalDiscount,
       deliveryAddress,
+      deliveryDate,
       addresses,
       selectedAddressId,
       addressConfirmed,
+      saleSection: saleSectionLabel ?? saleSection,
       openedAt: draftOpenedAt || new Date().toISOString(),
       savedAt: new Date().toISOString(),
     });
@@ -565,12 +696,18 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCustomerPhone("");
     setCustomerError("");
     setDeliveryAddress("");
+    setDeliveryDate(todayForDateInput());
     setAddresses([]);
     setSelectedAddressId(null);
     setAddressConfirmed(false);
     setAddressError("");
     setGlobalDiscount(0);
+    if (activeReservationOrderId) {
+      removeOrder(activeReservationOrderId);
+      setActiveReservationOrderId(null);
+    }
     success("Sotuv qoralamaga saqlandi", "Saqlangan sotuvni Qoralama bo‘limidan davom ettirishingiz mumkin.");
+    onSaleActionComplete?.("Qoralama");
   };
 
   /* =====================================================
@@ -729,11 +866,12 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     ? completedSale.deliveryAddresses
     : addresses;
   const receiptAddressRows = savedReceiptAddresses
-    .filter((address) => address.address?.trim())
-    .map((address) => address.address.trim());
+    .filter((address) => address.address?.trim() || address.deliveryDate)
+    .map((address) => ({ address: address.address?.trim() || "—", deliveryDate: address.deliveryDate || "" }));
   if (!receiptAddressRows.length) {
     const address = completedSale?.deliveryAddress || deliveryAddress;
-    if (address?.trim()) receiptAddressRows.push(address.trim());
+    const scheduledDate = completedSale?.items?.find((item) => item.deliveryDate)?.deliveryDate || (deliveryDateSelected ? deliveryDate : "");
+    if (address?.trim() || scheduledDate) receiptAddressRows.push({ address: address?.trim() || "—", deliveryDate: scheduledDate });
   }
   /* =====================================================
      RECEIPT OPEN
@@ -852,8 +990,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const confirmPayment = () => {
     if (!paymentOpen || paymentComplete || paymentSubmittingRef.current || cart.length === 0) return;
     const currentProducts = getProducts();
-    const currentReservations = readReservedQuantities(activeReservationOrderId);
-    const insufficient = cart.find((item) => cart.filter((line) => String(line.id) === String(item.id)).reduce((sum, line) => sum + Number(line.qty), 0) > Math.max(0, Number(currentProducts.find((product) => String(product.id) === String(item.id))?.stock || 0) - Number(currentReservations[String(item.id)] || 0)));
+    const currentReservations = readReservedQuantitiesByCondition(activeReservationOrderId);
+    const insufficient = findInsufficientCartItem(cart, currentProducts, currentReservations);
     if (insufficient) { setProductList(currentProducts); setPaymentError(`${insufficient.name}: band qilinmagan mahsulot yetarli emas. Miqdorni kamaytiring.`); return; }
     const saleTotal = Math.round(total);
     const amount = paymentAmount === ""
@@ -878,13 +1016,14 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     const trimmedPhone = customerPhone.trim();
     const typedAddress = deliveryAddress.trim();
 
+    const scheduledDeliveryDate = deliveryDateSelected ? deliveryDate : "";
     const checkoutAddresses = addresses.length === 0
-      ? typedAddress
-        ? [{ id: createAddressId(), name: "Asosiy manzil", address: typedAddress, phone: "" }]
-        : []
+      ? (typedAddress || scheduledDeliveryDate
+        ? [{ id: createAddressId(), name: "Asosiy manzil", address: typedAddress, phone: "", deliveryDate: scheduledDeliveryDate }]
+        : [])
       : addresses.length === 1
-        ? [{ ...addresses[0], address: typedAddress || addresses[0].address }]
-        : addresses;
+        ? [{ ...addresses[0], address: typedAddress || addresses[0].address, deliveryDate: scheduledDeliveryDate }]
+        : addresses.map((address) => ({ ...address, deliveryDate: scheduledDeliveryDate }));
     const primaryAddress = checkoutAddresses[0]?.address || "";
 
     try {
@@ -998,6 +1137,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       employeeId: currentUser?.type === "employee" ? currentUser.id : null,
       employeeName: currentUser?.type === "employee" ? currentUser.name : "",
       sourceOrderId: activeReservationOrderId || null,
+      saleSection: saleSectionLabel ?? saleSection,
+      isDefectSale,
+      hasDefectItems: cart.some((item) => item.isDefectSale),
       customer: trimmedName,
       products: cart.length,
       productIds: cart.map((item) => item.id),
@@ -1023,19 +1165,24 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
         productCount: cart.filter((item) => item.addressId === address.id).length,
       })),
 
-      items: cart.map((item) => ({
-        id: item.id,
-        addressId: item.addressId || checkoutAddresses[0]?.id || null,
-        deliveryAddress: checkoutAddresses.find(
-          (address) => address.id === item.addressId
-        )?.address || primaryAddress,
-        name: item.name,
-        price: Number(item.price),
-        qty: Number(item.qty),
-        total:
-          Number(item.price) *
-          Number(item.qty),
-      })),
+      items: cart.map((item) => {
+        const itemAddressId = item.addressId || checkoutAddresses[0]?.id || null;
+        const selectedDeliveryAddress = checkoutAddresses.find((address) => address.id === itemAddressId);
+        const deliveryDate = scheduledDeliveryDate;
+        const pickupPending = deliveryDateSelected && /^\d{4}-\d{2}-\d{2}$/.test(deliveryDate);
+        return {
+          id: item.id,
+          addressId: itemAddressId,
+          deliveryAddress: selectedDeliveryAddress?.address || primaryAddress,
+          deliveryDate,
+          deliveryStatus: pickupPending ? "waiting" : "delivered",
+          name: item.name,
+          price: Number(item.price),
+          qty: Number(item.qty),
+          ...(item.defectId ? { defectId: item.defectId, defectStatus: item.defectStatus, defectReason: item.defectReason, isDefectSale: true } : {}),
+          total: Number(item.price) * Number(item.qty),
+        };
+      }),
 
       subtotal: Number(subtotal),
 
@@ -1070,24 +1217,29 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
        UPDATE PRODUCTS STOCK
     ================================================= */
 
-    const updatedProducts =
-      currentProducts.map((p) => {
-        const purchasedQty = cart
-          .filter((item) => item.id === p.id)
-          .reduce((sum, item) => sum + Number(item.qty), 0);
-
-        if (purchasedQty > 0) {
-          return {
-            ...p,
-            stock: Math.max(
-              0,
-              Number(p.stock) - purchasedQty
-            ),
-          };
-        }
-
-        return p;
-      });
+    const updatedProducts = currentProducts.map((p) => {
+      const productLines = cart.filter((item) => String(item.id) === String(p.id));
+      const purchasedQty = productLines.reduce((sum, item) => sum + Number(item.qty), 0);
+      if (purchasedQty <= 0) return p;
+      const defectLines = productLines.filter((item) => item.isDefectSale);
+      const normalQuantity = productLines.filter((item) => !item.isDefectSale).reduce((sum, item) => sum + Number(item.qty), 0);
+      const defectiveQuantity = defectLines.reduce((sum, item) => sum + Number(item.qty), 0);
+      if (!defectiveQuantity) return { ...p, stock: Math.max(0, Number(p.stock) - normalQuantity) };
+      const soldByDefect = new Map();
+      defectLines.forEach((item) => soldByDefect.set(String(item.defectId), (soldByDefect.get(String(item.defectId)) || 0) + Number(item.qty)));
+      const updatedDefects = (Array.isArray(p.defects) ? p.defects : []).map((defect, index) => {
+        const id = String(defect.id || `${p.id}-defect-${index}`);
+        const quantity = Math.max(0, Number(defect.quantity || 0) - (soldByDefect.get(id) || 0));
+        const unitPrice = Number(defect.unitPrice ?? defect.price ?? p.price ?? p.cost ?? 0);
+        return { ...defect, quantity, total: quantity * unitPrice };
+      }).filter((defect) => Number(defect.quantity) > 0);
+      return {
+        ...p,
+        stock: Math.max(0, Number(p.stock) - purchasedQty),
+        defectiveStock: Math.max(0, Number(p.defectiveStock || 0) - defectiveQuantity),
+        defects: updatedDefects,
+      };
+    });
 
     saveProducts(updatedProducts);
     setProductList(updatedProducts);
@@ -1141,6 +1293,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCustomerPhone("");
     setCustomerError("");
     setDeliveryAddress("");
+    setDeliveryDate(todayForDateInput());
+    setDeliveryDateSelected(false);
     setAddresses([]);
     setSelectedAddressId(null);
     setAddressConfirmed(false);
@@ -1177,8 +1331,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setCustomerName,
     customerSuggestions: readPosCustomerSuggestions(customerStorageKey, salesStorageKey, customerName, customerPhone),
     selectCustomer: (customer) => {
-      setCustomerName(customer.name);
-      setCustomerPhone(customer.phone);
+      setCustomerName(capitalizeCustomerName(customer.name));
+      setCustomerPhone(phoneDigits(customer.phone));
       setCustomerError("");
     },
 
@@ -1214,6 +1368,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     handleCheckout,
     handleOpenReceipt,
     onSaveDraft: requestSaveSaleDraft,
+    onReserveOrder: requestSaveOrder,
 
     customerError,
     paymentOpen,
@@ -1225,6 +1380,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setSelectedCardId,
     debtDueDate,
     setDebtDueDate,
+    deliveryDate,
+    setDeliveryDate,
+    setDeliveryDateSelected,
     paymentError,
     setPaymentError,
     paymentComplete,
@@ -1241,12 +1399,14 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     <div className="pos-container pos-split-layout">
       {quickAddProduct && (
         <ProductQuickAddModal
-          product={quickAddProduct}
+          product={{ ...quickAddProduct, stock: availableStock(quickAddProduct) }}
           suppliers={suppliers}
           quantity={quickAddQuantity}
           onQuantityChange={setQuickAddQuantity}
           onAdd={confirmQuickAdd}
-          onClose={() => setQuickAddProduct(null)}
+          defectRows={quickAddProduct.defectId ? null : defectSaleRows(quickAddProduct)}
+          initialDefectId={quickAddInitialDefectId}
+          onClose={closeQuickAdd}
         />
       )}
 
@@ -1258,7 +1418,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
         <div className="pos-header">
           <h1 className="pos-title">
-            {headingText ? tx(headingText) : tx(text(
+            {saleSection ? tx(saleSection) : headingText ? tx(headingText) : tx(text(
               "title",
               orderMode ? "Yangi buyurtma" : "Yangi Sotuv"
             ))}
@@ -1304,7 +1464,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
             />
           </div>
 
-          <SalesProductFilter products={productList} value={categoryFilter} onChange={setCategoryFilter} placeholder="Kategoriya..." />
+          <SalesProductFilter products={saleProducts} value={categoryFilter} onChange={setCategoryFilter} placeholder="Kategoriya..." />
         </div>
 
         {/* =================================================
@@ -1318,7 +1478,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
               <FiSearch size={30} />
 
-              <p>{tx("Mahsulot topilmadi")}</p>
+              <p>{tx(isDefectSale ? "Brak mahsulot topilmadi" : "Mahsulot topilmadi")}</p>
 
             </div>
           ) : (
@@ -1327,16 +1487,19 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
               const inCart =
                 cart.find(
                   (c) =>
-                    c.id === p.id
+                    c.id === p.id && (isDefectSale ? c.defectId === p.defectId : !c.defectId)
                 );
 
               const productAvailable = availableStock(p);
-              const productReserved = Number(reservedStock[String(p.id)] || 0);
+              const productId = String(p.id);
+              const productReserved = isDefectSale
+                ? reservedDefectQuantity(productId, p.defectId)
+                : Number(reservedStock.good?.[productId] || 0) + Number(reservedStock.defective?.[productId] || 0);
               const isOutOfStock = productAvailable === 0;
 
               return (
                 <div
-                  key={p.id}
+                  key={isDefectSale ? `${p.id}-${p.defectId}` : p.id}
                   onClick={() => openQuickAdd(p)}
                   className={`product-card ${inCart
                     ? "in-cart"
@@ -1364,18 +1527,18 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
                       </div>
                       <div className="pos-product-stock-stack">
                         <span className={`pos-product-stock ${productAvailable < 5 ? "low-stock" : ""}`}>
-                          {tx(isOutOfStock ? "Tugagan" : `Qoldiq: ${productAvailable} dona`)}
+                          {tx(isOutOfStock ? "Tugagan" : isDefectSale ? `Brak qoldig'i: ${productAvailable} dona` : `Qoldiq: ${productAvailable} dona`)}
                         </span>
                         {productReserved > 0 && <span className="pos-product-reserved">{tx("Band qilingan")}: {tx(productReserved)} {tx("dona")}</span>}
                       </div>
                     </div>
 
-                    <div className="product-category"><span className="pos-product-label">{tx("Kategoriya:")}</span> {p.category ? tx(p.category) : tx("Ko'rsatilmagan")}</div>
-                    <div className="pos-product-meta">{[p.brand && `${tx("Brend:")} ${p.brand}`, p.sku && `SKU: ${p.sku}`].filter(Boolean).join(" · ")}</div>
+                    {isDefectSale ? <div className="product-category"><span className="pos-product-label">{tx("Brak holati:")}</span> {tx(p.defectStatus || "Brak")}</div> : <div className="product-category"><span className="pos-product-label">{tx("Kategoriya:")}</span> {p.category ? tx(p.category) : tx("Ko'rsatilmagan")}</div>}
+                    <div className="pos-product-meta">{isDefectSale ? [p.defectReason && `${tx("Sabab:")} ${p.defectReason}`, p.brand && `${tx("Brend:")} ${p.brand}`, p.sku && `SKU: ${p.sku}`].filter(Boolean).join(" · ") : [p.brand && `${tx("Brend:")} ${p.brand}`, p.sku && `SKU: ${p.sku}`].filter(Boolean).join(" · ")}</div>
 
                     <div className="product-footer">
 
-                      <span className="product-price"><span className="pos-product-label">{tx("Narxi:")}</span> {formatCurrency(p.price)}</span>
+                      <span className="product-price"><span className="pos-product-label">{tx(isDefectSale ? "Brak narxi:" : "Narxi:")}</span> {formatCurrency(isDefectSale ? p.defectPrice : p.price)}</span>
 
                     </div>
 
@@ -1387,7 +1550,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
                         openQuickAdd(p);
                       }}
                     >
-                      <FiShoppingCart size={17} />{tx("Savatga qo'shish")}</button>
+                      <FiShoppingCart size={17} />{tx(isDefectSale ? "Brakni savatga qo'shish" : "Savatga qo'shish")}</button>
 
                   </div>
 
@@ -1718,10 +1881,10 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
                 </div>
 
-                {receiptAddressRows.map((address, index) => (
+                {receiptAddressRows.map(({ address, deliveryDate }, index) => (
                   <div className="receipt-customer-row receipt-address-row" key={`${index}-${address}`}>
                     <span>{tx("Yetkazish manzili")}{receiptAddressRows.length > 1 ? ` ${index + 1}` : ""}:</span>
-                    <strong>{address}</strong>
+                    <strong>{address}{deliveryDate ? <small style={{ display: "block", fontWeight: 500 }}>{tx("Yetkazib berish sanasi")}: {deliveryDate.split("-").reverse().join(".")}</small> : null}</strong>
                   </div>
                 ))}
               </div>
@@ -1754,6 +1917,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
                       </div>
 
                       <div className="receipt-product-bottom">
+
+                        {item.isDefectSale && <span style={{ color: "var(--danger)" }}>{tx("Brak")}{item.defectStatus ? ` · ${tx(item.defectStatus)}` : ""}{item.defectReason ? ` · ${tx(item.defectReason)}` : ""}</span>}
 
                         <span>
                           {tx(item.qty)}{tx(" dona ?")}{" "}

@@ -23,14 +23,37 @@ const restore = (workspaceKey, draftPrefix, migrateLegacyDraft) => {
   saved = { ...saved, tabs: saved.tabs.map(tab => ({ ...tab, customerPhone: tab.customerPhone || "", openedAt: tab.openedAt || new Date().toISOString() })), next: Number(saved.next) || 2 };
   const pending = readSaleDraftResume();
   if (pending?.workspaceKey === workspaceKey) {
-    const tabNumber = Math.max(saved.next, ...saved.tabs.map(tab => Number(tab.number) || 0), 0);
-    const tab = createTab(tabNumber, pending.openedAt || pending.savedAt || new Date().toISOString());
+    const pendingDraft = pending.posDraft || pending;
+    const openedAt = pending.openedAt || pending.savedAt || new Date().toISOString();
+    const isEmptyTab = (tab) => {
+      const tabDraft = readPosDraft(draftPrefix + tab.id);
+      return !tab.customerName?.trim()
+        && !tab.customerPhone?.trim()
+        && !Number(tab.count)
+        && !(tabDraft.cart || []).length
+        && !tabDraft.customerName?.trim()
+        && !tabDraft.customerPhone?.trim()
+        && !tabDraft.deliveryAddress?.trim()
+        && !(tabDraft.addresses || []).length;
+    };
+    const emptyTabIndex = saved.tabs.findIndex(isEmptyTab);
+    const tab = emptyTabIndex >= 0
+      ? saved.tabs[emptyTabIndex]
+      : createTab(Math.max(saved.next, ...saved.tabs.map((item) => Number(item.number) || 0), 0), openedAt);
     try {
-      setData(draftPrefix + tab.id, pending.posDraft);
+      setData(draftPrefix + tab.id, pendingDraft);
       clearSaleDraftResume();
-      tab.customerName = pending.customerName || "";
-      tab.count = pending.cart?.length || 0;
-      return { ...saved, tabs: [...saved.tabs, tab], active: tab.id, next: tab.number + 1 };
+      const resumedTab = {
+        ...tab,
+        customerName: pending.customerName || pendingDraft.customerName || "",
+        customerPhone: pending.customerPhone || pendingDraft.customerPhone || "",
+        count: pending.cart?.length || pendingDraft.cart?.length || 0,
+        openedAt,
+      };
+      const tabs = emptyTabIndex >= 0
+        ? saved.tabs.map((item, index) => index === emptyTabIndex ? resumedTab : item)
+        : [...saved.tabs, resumedTab];
+      return { ...saved, tabs, active: resumedTab.id, next: Math.max(saved.next, resumedTab.number + 1) };
     } catch { /* Keep the pending resume record so it can be retried. */ }
   }
   return saved;

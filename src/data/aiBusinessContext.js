@@ -22,9 +22,14 @@ export function buildBusinessSnapshot() {
   const { incomes, expenses } = readFinanceOperations();
   const income = sum(incomes, "amount");
   const expense = sum(expenses, "amount");
-  const salesRevenue = sum(sales, "amount");
-  const debt = sum(sales, "debtBalance");
   const approvedReturns = returns.filter((item) => item.status === "approved");
+  const returnedBySale = approvedReturns.reduce((totals, item) => {
+    const saleId = String(item.saleId || "");
+    totals[saleId] = (totals[saleId] || 0) + Number(item.amount || 0);
+    return totals;
+  }, {});
+  const salesRevenue = Math.max(0, sum(sales, "amount") - sum(approvedReturns, "amount"));
+  const debt = sales.reduce((total, sale) => total + Math.max(0, Number(sale.debtBalance || 0) - Math.min(Number(sale.debtBalance || 0), Number(returnedBySale[String(sale.id)] || 0))), 0);
   const expenseByCategory = Object.entries(expenses.reduce((result, item) => {
     result[item.category] = (result[item.category] || 0) + Number(item.amount || 0);
     return result;

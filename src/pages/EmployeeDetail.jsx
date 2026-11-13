@@ -24,7 +24,7 @@ import { dateKey, formatSalaryPeriod, monthKey, salaryMonthRows } from "../data/
 import { useToast } from "../context/ToastContext";
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { ADDITIONAL_SALES_KEY, getSales } from "../supabase/bolimlar/sotuvlar";
+import { ADDITIONAL_SALES_KEY, getReturns, getSales } from "../supabase/bolimlar/sotuvlar";
 const roleColors = {
   Admin: { bg: "var(--brand-light)", color: "var(--brand)" },
   Manager: { bg: "var(--violet-light)", color: "var(--violet)" },
@@ -45,6 +45,8 @@ const employeeRegisteredDate = (value) => value && !Number.isNaN(new Date(value)
   : "Sana saqlanmagan";
 const readEmployeeSales = (employeeId) => {
   const payments = readDebtPayments().map((payment) => ({ ...payment, saleId: String(payment.saleId) }));
+  let approvedReturns = [];
+  try { approvedReturns = getReturns().filter((record) => record.status === "approved"); } catch { /* Show sales without return adjustments if the return list is unavailable. */ }
   let additionalSales = [];
   try {
     const saved = getSales(ADDITIONAL_SALES_KEY);
@@ -60,6 +62,12 @@ const readEmployeeSales = (employeeId) => {
   } catch { /* Ignore unreadable secondary POS records. */ }
   return [...readPosSales(), ...additionalSales]
     .map((sale) => withDebtBalance(sale, payments))
+    .map((sale) => {
+      const returnedAmount = approvedReturns.filter((record) => String(record.saleId) === String(sale.id)).reduce((sum, record) => sum + Number(record.amount || 0), 0);
+      const amount = Math.max(0, Number(sale.amount || 0) - returnedAmount);
+      const debtBalance = Math.max(0, Number(sale.debtBalance || 0) - Math.min(Number(sale.debtBalance || 0), returnedAmount));
+      return { ...sale, amount, paidAmount: Math.min(amount, Number(sale.paidAmount || 0)), debtBalance, returnedAmount };
+    })
     .filter((sale) => String(sale.employeeId ?? sale.cashierEmployeeId ?? sale.sellerEmployeeId ?? "") === String(employeeId))
     .sort((left, right) => new Date(right.createdAt || right.date).getTime() - new Date(left.createdAt || left.date).getTime());
 };

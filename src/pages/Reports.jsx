@@ -125,10 +125,6 @@ export default function Reports() {
     const sales = readPosSales().map((sale) => withDebtBalance(sale, payments));
     const finance = readFinanceOperations();
     const returns = readBusinessList("crm_returns").filter((item) => item.status === "approved");
-    const returnedBySale = returns.reduce((totals, item) => {
-      totals[String(item.saleId || "")] = (totals[String(item.saleId || "")] || 0) + Number(item.amount || 0);
-      return totals;
-    }, {});
     const grouped = {};
     const add = (date, key, amount) => {
       const day = reportDate(date);
@@ -136,10 +132,10 @@ export default function Reports() {
       if (!grouped[day]) grouped[day] = { date: day, revenue: 0, profit: 0, expenses: 0 };
       grouped[day][key] += Number(amount || 0);
     };
-    sales.forEach((sale) => add(sale.createdAt || sale.date, "revenue", Math.max(0, Number(sale.amount || 0) - Number(returnedBySale[String(sale.id)] || 0))));
+    sales.forEach((sale) => add(sale.createdAt || sale.date, "revenue", Number(sale.amount || 0)));
+    returns.forEach((item) => add(item.date || item.createdAt, "revenue", -Number(item.amount || 0)));
     finance.incomes.forEach((item) => add(item.date, "revenue", item.amount));
     finance.expenses.forEach((item) => add(item.date, "expenses", item.amount));
-    returns.forEach((item) => add(item.createdAt || item.date, "expenses", item.amount));
     return Object.values(grouped).map((item) => ({ ...item, profit: item.revenue - item.expenses })).sort((a, b) => a.date.localeCompare(b.date));
   }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -14,6 +14,11 @@ import {
   Sun,
   Moon,
   LayoutDashboard,
+  FileText,
+  CalendarClock,
+  RotateCcw,
+  PackageX,
+  UserRound,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useLanguage, languages } from "../context/LanguageContext";
@@ -24,6 +29,9 @@ import { getCurrencySettings, saveCurrencySettings } from "../data/currency";
 import { formatCurrency } from "../data/currency";
 import { getProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getCustomers } from "../supabase/bolimlar/mijozlar";
+import Modal from "./Modal";
+import { buildNavItems } from "./Sidebar";
+import { canAccess } from "../data/accessStore";
 
 const COMPACT_QUERY = "(max-width: 700px)";
 // Kurs oynasi animatsiyasi (2 soniyadan ancha qisqa).
@@ -44,7 +52,7 @@ function morphFrames(card, origin) {
   ];
 }
 
-export default function Topbar({ onNavigate, onOpen, user, profile }) {
+export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, profile }) {
   useUILanguage();
   const { dark, toggle } = useTheme();
   const { lang, setLang, t } = useLanguage();
@@ -53,6 +61,11 @@ export default function Topbar({ onNavigate, onOpen, user, profile }) {
   const [currency, setCurrency] = useState(getCurrencySettings);
   const [rateDraft, setRateDraft] = useState(() => String(getCurrencySettings().usdRate || ""));
   const [rateModal, setRateModal] = useState(false);
+  const [saleSectionsOpen, setSaleSectionsOpen] = useState(false);
+
+  const [customSections, setCustomSections] = useState([]);
+  const [addSectionOpen, setAddSectionOpen] = useState(false);
+  const [newSectionPage, setNewSectionPage] = useState("");
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -164,6 +177,33 @@ export default function Topbar({ onNavigate, onOpen, user, profile }) {
       : [];
   const showEmpty =
     q.length > 1 && !filteredProducts.length && !filteredCustomers.length;
+  const menuPages = new Set(["sales-new", "sales-pos", "drafts", "orders", "customers", "sales-returns", "defective-products", "pending-pickups", ...customSections]);
+  const accessiblePages = buildNavItems(t).flatMap((item) => item.children || [item])
+    .filter((item) => item.id && canAccess(user, item.id));
+  const availablePages = accessiblePages.filter((item) => !menuPages.has(item.id));
+  const saleSections = [
+    { label: "Qoralama", icon: FileText, color: "#8b5cf6", bg: "rgba(139,92,246,.10)" },
+    { label: "Band qilingan", icon: CalendarClock, color: "#f59e0b", bg: "rgba(245,158,11,.12)" },
+    { label: "Mijoz bor", icon: UserRound, color: "#2563eb", bg: "rgba(37,99,235,.10)" },
+    { label: "Qaytmalar", icon: RotateCcw, color: "#0f9f82", bg: "rgba(15,159,130,.10)" },
+    { label: "Brak", icon: PackageX, color: "#e45555", bg: "rgba(228,85,85,.10)" },
+    { label: "Yetkazib berish", icon: CalendarClock, color: "#d28b16", bg: "rgba(210,139,22,.12)" },
+    ...accessiblePages.filter((item) => customSections.includes(item.id)).map((item) => ({ ...item, color: "#64748b", bg: "rgba(100,116,139,.10)" })),
+  ];
+  const openSaleSection = (label, pageId) => {
+    const targetPage = pageId || (label === "Yetkazib berish" ? "pending-pickups" : "");
+    onSelectSaleSection?.(targetPage ? "page:" + targetPage : label);
+    setSaleSectionsOpen(false);
+    setAddSectionOpen(false);
+  };
+  const addSaleSection = (event) => {
+    event.preventDefault();
+    const page = availablePages.find((item) => item.id === newSectionPage);
+    if (!page) return;
+    setCustomSections((current) => current.includes(page.id) ? current : [...current, page.id]);
+    setNewSectionPage("");
+    setAddSectionOpen(false);
+  };
   const quickActions = [
     {
       icon: ShoppingCart,
@@ -195,7 +235,7 @@ export default function Topbar({ onNavigate, onOpen, user, profile }) {
   return (
     <>
       <header
-        className="topbar-container flex items-center justify-between h-16 px-3 sm:px-6 gap-2 sm:gap-3 shrink-0 w-full"
+        className="crm-topbar topbar-container flex items-center justify-between h-16 px-3 sm:px-6 gap-2 sm:gap-3 shrink-0 w-full"
         style={{
           background: "var(--topbar-bg)",
           borderBottom: "1px solid var(--border)",
@@ -306,21 +346,17 @@ export default function Topbar({ onNavigate, onOpen, user, profile }) {
 
           <button
             type="button"
-            onClick={() => onNavigate("sales-new")}
+            onClick={() => { setSaleSectionsOpen(true); setAddSectionOpen(false); }}
             aria-label={tx(t("topbar.newSale", "Yangi sotuv"))}
             title={tx(t("topbar.newSale", "Yangi sotuv"))}
-            className="quick-sale-btn flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 shrink-0"
+            className="quick-sale-btn flex items-center justify-center w-9 h-9 rounded-xl transition-all hover:opacity-90 active:scale-95 shrink-0"
             style={{
-              background:
-                "linear-gradient(135deg,var(--brand) 0%,var(--brand-hover) 100%)",
-              boxShadow: "0 2px 8px rgba(37,99,235,0.3)",
+              background: "rgba(139,92,246,.10)",
+              border: "1px solid rgba(139,92,246,.10)",
+              color: "#8b5cf6",
             }}
           >
-            <span className="quick-sale-icons" aria-hidden="true">
-              <ShoppingCart size={17} strokeWidth={2.2} />
-              <Plus size={13} strokeWidth={3} />
-            </span>
-            <span className="quick-sale-text">{tx(t("topbar.newSale", "Yangi sotuv"))}</span>
+            <FileText size={18} strokeWidth={2} aria-hidden="true" />
           </button>
 
           <div
@@ -353,6 +389,48 @@ export default function Topbar({ onNavigate, onOpen, user, profile }) {
           </div>
         </div>
       </header>
+
+      <Modal
+        open={saleSectionsOpen}
+        onClose={() => { setSaleSectionsOpen(false); setAddSectionOpen(false); }}
+        title="Sotuv bo‘limini tanlang"
+        subtitle="Yangi sotuvni qaysi bo‘limda boshlaysiz?"
+        icon={ShoppingCart}
+        width={620}
+        contentOnly
+      >
+        <div className="sale-section-modal">
+          <div className="sale-section-grid">
+            {saleSections.map(({ id, label, icon: SectionIcon, color, bg }) => (
+              <button
+                type="button"
+                key={id || label}
+                className="sale-section-option"
+                onClick={() => openSaleSection(label, id)}
+              >
+                <span className="sale-section-icon" style={{ color, background: bg }}><SectionIcon size={19} /></span>
+                <span className="sale-section-label">{tx(label)}</span>
+                <span className="sale-section-arrow" aria-hidden="true">›</span>
+              </button>
+            ))}
+            <button type="button" className="sale-section-option sale-section-add" onClick={() => setAddSectionOpen((open) => !open)}>
+              <span className="sale-section-icon"><Plus size={19} /></span>
+              <span className="sale-section-label">{tx("Bo‘lim qo‘shish")}</span>
+              <span className="sale-section-arrow" aria-hidden="true">+</span>
+            </button>
+          </div>
+          {addSectionOpen && (
+            <form className="sale-section-add-form" onSubmit={addSaleSection}>
+              <select autoFocus value={newSectionPage} onChange={(event) => setNewSectionPage(event.target.value)} aria-label={tx("Sahifani tanlang")}>
+                <option value="">{tx(availablePages.length ? "Sahifani tanlang" : "Qo‘shish uchun sahifa qolmadi")}</option>
+                {availablePages.map((item) => <option key={item.id} value={item.id}>{tx(item.label)}</option>)}
+              </select>
+              <button type="submit" disabled={!newSectionPage.trim()}>{tx("Qo‘shish")}</button>
+            </form>
+          )}
+
+        </div>
+      </Modal>
 
       {rateModal && createPortal(<div ref={rateBackdropRef} data-motion="manual" className={`crm-content-modal currency-rate-modal${compactCurrency ? " is-screen" : ""}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeRateEditor(); }}>
         <form ref={rateCardRef} role="dialog" aria-modal="true" aria-labelledby="currency-rate-title" onSubmit={saveRate} className="currency-rate-card" style={{ width: "min(100%, 420px)", padding: 24, borderRadius: 18, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>

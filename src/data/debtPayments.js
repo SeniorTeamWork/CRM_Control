@@ -18,11 +18,11 @@ export function saveDebtPayment(payment) {
   return payments;
 }
 
-export function readPosSales() {
+export function readPosSales(key = "crm_sales") {
   try {
-    const saved = getSales();
+    const saved = getSales(key);
     if (!Array.isArray(saved)) return [];
-    const numbers = documentNumbers(saved, "sales");
+    const numbers = documentNumbers(saved, key === "crm_additional_pos_sales" ? "additional-pos" : "sales");
     return saved.map((sale) => {
       const amount = Number(sale.amount ?? sale.total ?? 0);
       const status = sale.status || (Number(sale.debtBalance || 0) > 0 ? "partial" : "paid");

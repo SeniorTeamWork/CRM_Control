@@ -285,17 +285,17 @@ export default function Login({ onLogin, tenantId, tenantInvite }) {
               }}
             >
               {locked ? (
-                <>
-                  <Lock size={16} /> {tx("Qayta urinish")}: <span style={{ fontVariantNumeric: "tabular-nums" }}>{lock.label}</span>
-                </>
+                <span key="locked" className="inline-flex items-center gap-2">
+                  <Lock size={16} /><span>{tx("Qayta urinish")}: {lock.label}</span>
+                </span>
               ) : loading ? (
-                <>
-                  <span className="spinner" /> {tx(t("login.loading", "Yuklanmoqda..."))}
-                </>
+                <span key="loading" className="inline-flex items-center gap-2">
+                  <span className="spinner" /><span>{tx(t("login.loading", "Yuklanmoqda..."))}</span>
+                </span>
               ) : (
-                <>
-                  {tx(setupComplete ? "Kirish" : "Direktor hisobini yaratish")} <ArrowRight size={16} />
-                </>
+                <span key="ready" className="inline-flex items-center gap-2">
+                  <span>{tx(setupComplete ? "Kirish" : "Direktor hisobini yaratish")}</span><ArrowRight size={16} />
+                </span>
               )}
             </button>
           </form>
