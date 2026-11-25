@@ -320,6 +320,7 @@ function ReceiptProductFields({ value, onChange, suggestions = [], onChooseProdu
 export default function Suppliers({ onNavigate, section = "suppliers" }) {
   useUILanguage();
   const activeSection = section;
+  const initialSectionRef = useRef(activeSection);
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -431,7 +432,7 @@ export default function Suppliers({ onNavigate, section = "suppliers" }) {
   const [newSupplierConfirmation, setNewSupplierConfirmation] = useState(false);
   useEffect(() => {
     const saved = readSupplierReceiptDraft();
-    const savedUi = saved.uiBySection?.[activeSection] || {};
+    const savedUi = saved.uiBySection?.[initialSectionRef.current] || {};
     if (saved.supplier?.form) setForm(saved.supplier.form);
     if (Array.isArray(saved.supplier?.pendingProducts)) setPendingProducts(saved.supplier.pendingProducts);
     if (Array.isArray(saved.supplier?.receiptSupplierGroups)) setReceiptSupplierGroups(saved.supplier.receiptSupplierGroups);
