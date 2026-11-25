@@ -53,6 +53,7 @@ export function expandEmployeePermissions(permissions = []) {
 
 export function sectionForPage(page) {
   if (page === "help" || page === "notifications") return null;
+  if (page.startsWith("product-defect-")) return "defective-products";
   if (page === "orders") return "orders-reservations";
   if (page === "suppliers") return "suppliers-main";
   if (ACCESS_SECTIONS.some((section) => section.id === page)) return page;

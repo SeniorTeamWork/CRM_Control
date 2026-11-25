@@ -49,6 +49,11 @@ export default function Employees({ onNavigate }) {
   // Boshqa kassir yoki kompyuterda o'zgarsa, Supabase'dan kelgan yangi holat qayta o'qiladi.
   const dataVersion = useDataVersion();
   useEffect(() => { if (dataVersion) { try { setEmployees(readEmployees()); } catch { /* eski ro'yxat qoladi */ } } }, [dataVersion]);
+  useEffect(() => {
+    const refreshEmployees = () => { try { setEmployees(readEmployees()); } catch { /* eski ro'yxat qoladi */ } };
+    window.addEventListener("crm-employees-updated", refreshEmployees);
+    return () => window.removeEventListener("crm-employees-updated", refreshEmployees);
+  }, []);
   const [open, setOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 

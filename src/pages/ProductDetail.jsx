@@ -29,7 +29,7 @@ import {
 } from "recharts";
 // import { useToast } from "../context/ToastContext";
 import { useLanguage } from "../context/LanguageContext";
-import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
+import { currencyLabel, formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
 import { getData, setData } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 const readList = (key) => {
@@ -55,7 +55,7 @@ const findProduct = (productId) => {
 };
 const EmptyData = ({ icon: Icon, text }) => <div className="py-10 text-center"><Icon size={24} className="mx-auto mb-2" style={{ color: "var(--text-faint)" }}/><p className="text-sm" style={{ color: "var(--text-muted)" }}>{tx(text)}</p></div>;
 
-export default function ProductDetail({ productId, onBack }) {
+export default function ProductDetail({ productId, onBack, animateDefectCount = false, openDefectEditor = false }) {
   useUILanguage();
   const [product, setProduct] = useState(() => findProduct(productId));
   const [, refreshMetrics] = useState(0);
@@ -67,14 +67,39 @@ export default function ProductDetail({ productId, onBack }) {
     return () => { window.removeEventListener("storage", refresh); window.clearInterval(timer); };
   }, [productId]);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [returnDraft, setReturnDraft] = useState(null);
   const [returnConfirming, setReturnConfirming] = useState(false);
   const [returnReceipt, setReturnReceipt] = useState(null);
   const returnSaving = useRef(false);
+  const defectEditorOpenedFor = useRef("");
   const { success, error } = useToast();
   const { t } = useLanguage();
   const [tab, setTab] = useState("overview");
+  useEffect(() => {
+    if (!openDefectEditor) {
+      defectEditorOpenedFor.current = "";
+      return;
+    }
+    if (!product || defectEditorOpenedFor.current === String(productId)) return;
+    defectEditorOpenedFor.current = String(productId);
+    setEditForm({
+      name: product.name || "",
+      brand: product.brand || "",
+      sku: product.sku || "",
+      category: product.category || "",
+      price: product.price ?? "",
+      cost: product.cost ?? "",
+      stock: product.stock ?? "",
+      defectiveStock: "",
+      defectAction: "add",
+      addDefectToStock: true,
+      defectUnitPrice: "",
+      defectSalePrice: "",
+    });
+    setIsEditOpen(true);
+  }, [openDefectEditor, product, productId]);
   if (!product) {
     return (
       <div className="space-y-6 fade-in">
@@ -134,20 +159,28 @@ export default function ProductDetail({ productId, onBack }) {
   const minimumStock = Number(product.minStock ?? product.minStockLevel ?? product.minQuantity ?? 0);
   const vatRate = Number(product.vat ?? product.vatRate ?? 0);
   const productSupplierReturns = supplierReturns.filter((item) => String(item.productId) === String(product.id));
-  const defectiveStock = Math.min(Math.max(0, Number(product.stock || 0)), Math.max(0, Number(product.defectiveStock ?? product.defects?.reduce((sum, defect) => sum + Number(defect.quantity || 0), 0) ?? 0)));
+  const totalStock = Math.max(0, Number(product.stock || 0));
+  const defectiveStock = Math.min(totalStock, Math.max(0, Number(product.defectiveStock ?? product.defects?.reduce((sum, defect) => sum + Number(defect.quantity || 0), 0) ?? 0)));
+  const usableStock = Math.max(0, totalStock - defectiveStock);
   const defectEntries = Array.isArray(product.defects) ? product.defects.filter((defect) => Number(defect.quantity) > 0) : [];
   const recordedDefectQuantity = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0), 0);
   const unrecordedDefectQuantity = Math.max(0, defectiveStock - recordedDefectQuantity);
-  const defectCostTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? product.cost ?? 0), 0)
-    + unrecordedDefectQuantity * Number(product.defectUnitPrice ?? product.cost ?? 0);
-  const defectSellTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.salePrice ?? defect.sellingPrice ?? product.defectSalePrice ?? product.defectPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0), 0)
-    + unrecordedDefectQuantity * Number(product.defectSalePrice ?? product.defectPrice ?? product.price ?? product.cost ?? 0);
+  const defectCostTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? 0), 0)
+    + unrecordedDefectQuantity * Number(product.defectUnitPrice ?? 0);
+  const defectSellTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.salePrice ?? defect.sellingPrice ?? product.defectSalePrice ?? product.defectPrice ?? 0), 0)
+    + unrecordedDefectQuantity * Number(product.defectSalePrice ?? product.defectPrice ?? 0);
   const defectCostPrice = defectiveStock > 0
     ? defectCostTotal / defectiveStock
     : Number(product.defectUnitPrice ?? 0);
   const defectSellPrice = defectiveStock > 0
     ? defectSellTotal / defectiveStock
     : Number(product.defectSalePrice ?? product.defectPrice ?? 0);
+  const plannedDefectChange = Math.max(0, Number(editForm.defectiveStock) || 0);
+  const plannedDefectTotal = editForm.defectAction === "reduce"
+    ? Math.max(0, defectiveStock - plannedDefectChange)
+    : defectiveStock + plannedDefectChange;
+  const plannedStockTotal = Number(editForm.stock ?? product.stock ?? 0)
+    + (editForm.defectAction !== "reduce" && editForm.addDefectToStock !== false ? plannedDefectChange : 0);
   const money = (value) => formatCurrency(value);
   const dateLabel = (value) => parsedDate(value)?.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short", year: "numeric" }) || "—";
   const startProductReturn = () => {
@@ -326,6 +359,11 @@ export default function ProductDetail({ productId, onBack }) {
       price: product.price ?? "",
       cost: product.cost ?? "",
       stock: product.stock ?? "",
+      defectiveStock: "",
+      defectAction: "add",
+      addDefectToStock: true,
+      defectUnitPrice: "",
+      defectSalePrice: "",
     });
     setIsEditOpen(true);
   };
@@ -334,6 +372,75 @@ export default function ProductDetail({ productId, onBack }) {
       error("Mahsulot nomi, narxlari va qoldig'ini kiriting");
       return;
     }
+    const stock = Number(editForm.stock);
+    const defectChange = Number(editForm.defectiveStock || 0);
+    const hasDefectUnitPrice = editForm.defectUnitPrice !== "" && editForm.defectUnitPrice !== undefined;
+    const hasDefectSalePrice = editForm.defectSalePrice !== "" && editForm.defectSalePrice !== undefined;
+    const defectUnitPrice = hasDefectUnitPrice ? Number(editForm.defectUnitPrice) : null;
+    const defectSalePrice = hasDefectSalePrice ? Number(editForm.defectSalePrice) : null;
+    if (!Number.isFinite(defectChange) || defectChange < 0) {
+      error("Brak miqdori 0 dan kam bo'lishi mumkin emas");
+      return;
+    }
+    if ((hasDefectUnitPrice && (!Number.isFinite(defectUnitPrice) || defectUnitPrice < 0)) || (hasDefectSalePrice && (!Number.isFinite(defectSalePrice) || defectSalePrice < 0))) {
+      error("Brak narxlarini to'g'ri kiriting");
+      return;
+    }
+    const currentDefects = Array.isArray(product.defects) ? product.defects : [];
+    const currentRecordedQuantity = currentDefects.reduce((sum, defect) => sum + Math.max(0, Number(defect.quantity) || 0), 0);
+    const oldDefectiveQuantity = Math.max(0, Number(product.defectiveStock ?? currentRecordedQuantity) || 0);
+    const isAddingDefect = editForm.defectAction !== "reduce";
+    const targetDefectiveQuantity = isAddingDefect ? oldDefectiveQuantity + defectChange : oldDefectiveQuantity - defectChange;
+    const updatedStock = stock + (isAddingDefect && editForm.addDefectToStock ? defectChange : 0);
+    if (!isAddingDefect && defectChange > oldDefectiveQuantity) {
+      error("Kamaytiriladigan miqdor hozirgi brak sonidan ko'p bo'lishi mumkin emas");
+      return;
+    }
+    if (targetDefectiveQuantity > updatedStock) {
+      error("Brak miqdori ombordagi qoldiqdan ko'p. Yangi kirimga qo'shish variantini tanlang.");
+      return;
+    }
+    if (isAddingDefect && defectChange > 0 && (!hasDefectUnitPrice || !hasDefectSalePrice)) {
+      error("Yangi brak qo'shish uchun uning tannarxi va sotuv narxini kiriting");
+      return;
+    }
+    const savedDefects = (Array.isArray(product.defects) ? product.defects : [])
+      .filter((defect) => Number(defect.quantity) > 0)
+      .map((defect, index) => ({ ...defect, id: defect.id || `${product.id}-defect-${index}`, quantity: Number(defect.quantity) }));
+    const recordedQuantity = savedDefects.reduce((sum, defect) => sum + defect.quantity, 0);
+    const unrecordedQuantity = Math.max(0, oldDefectiveQuantity - recordedQuantity);
+    if (unrecordedQuantity > 0) savedDefects.push({
+      id: `${product.id}-defect-existing`, quantity: unrecordedQuantity, status: "Brak",
+      reason: "Sabab ko'rsatilmagan", date: product.createdAt || new Date().toISOString(),
+      unitPrice: Number(product.defectUnitPrice ?? 0),
+      salePrice: Number(product.defectSalePrice ?? product.defectPrice ?? 0),
+    });
+    if (isAddingDefect && defectChange > 0) {
+      const quantity = defectChange;
+      savedDefects.push({
+        id: crypto.randomUUID(), quantity, status: "Brak",
+        reason: "Keyinchalik brak aniqlandi", date: new Date().toISOString(),
+        unitPrice: defectUnitPrice, salePrice: defectSalePrice, total: quantity * defectUnitPrice,
+      });
+    } else if (!isAddingDefect && defectChange > 0) {
+      let toRemove = defectChange;
+      for (let index = savedDefects.length - 1; index >= 0 && toRemove > 0; index -= 1) {
+        const removed = Math.min(savedDefects[index].quantity, toRemove);
+        savedDefects[index].quantity -= removed;
+        toRemove -= removed;
+      }
+    }
+    const nextDefects = savedDefects
+      .filter((defect) => defect.quantity > 0)
+      .map((defect) => {
+        const nextUnitPrice = hasDefectUnitPrice ? defectUnitPrice : Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? 0);
+        return {
+          ...defect,
+          ...(hasDefectUnitPrice ? { unitPrice: defectUnitPrice } : {}),
+          ...(hasDefectSalePrice ? { salePrice: defectSalePrice } : {}),
+          total: defect.quantity * nextUnitPrice,
+        };
+      });
     const updatedProduct = {
       ...product,
       ...editForm,
@@ -343,13 +450,19 @@ export default function ProductDetail({ productId, onBack }) {
       category: editForm.category.trim(),
       price: Number(editForm.price),
       cost: Number(editForm.cost),
-      stock: Number(editForm.stock),
+      stock: updatedStock,
+      defectiveStock: targetDefectiveQuantity,
+      defectUnitPrice: hasDefectUnitPrice ? defectUnitPrice : product.defectUnitPrice,
+      defectSalePrice: hasDefectSalePrice ? defectSalePrice : product.defectSalePrice,
+      defectPrice: hasDefectSalePrice ? defectSalePrice : product.defectPrice,
+      defects: nextDefects,
     };
     try {
       let list = [];
       const saved = getProducts([]);
       if (Array.isArray(saved)) list = saved;
       saveProducts(list.map((item) => String(item.id) === String(product.id) ? updatedProduct : item));
+      window.dispatchEvent(new Event("crm-products-updated"));
       setProduct(updatedProduct);
       setIsEditOpen(false);
       success("Mahsulot tahrirlandi");
@@ -358,12 +471,12 @@ export default function ProductDetail({ productId, onBack }) {
     }
   };
   const deleteProduct = () => {
-    if (!window.confirm(`“${product.name}” mahsulotini o'chirmoqchimisiz?`)) return;
     try {
       let list = [];
       const saved = getProducts([]);
       if (Array.isArray(saved)) list = saved;
       saveProducts(list.filter((item) => String(item.id) !== String(product.id)));
+      setDeleteConfirmOpen(false);
       success("Mahsulot o'chirildi");
       onBack?.();
     } catch {
@@ -543,7 +656,7 @@ export default function ProductDetail({ productId, onBack }) {
               <button type="button" onClick={openEdit} className="btn-ghost flex-1 justify-center cursor-pointer" title={tx("Tahrirlash")}>
                 <Edit2 size={15} />{tx("Tahrirlash")}
               </button>
-              <button type="button" onClick={deleteProduct} className="flex flex-1 items-center justify-center gap-2 cursor-pointer" title={tx("O'chirish")} style={{ minHeight: 42, border: "1px solid var(--danger-border)", borderRadius: 12, background: "var(--danger-light)", color: "var(--danger)", fontWeight: 600 }}>
+              <button type="button" onClick={() => setDeleteConfirmOpen(true)} className="flex flex-1 items-center justify-center gap-2 cursor-pointer" title={tx("O'chirish")} style={{ minHeight: 42, border: "1px solid var(--danger-border)", borderRadius: 12, background: "var(--danger-light)", color: "var(--danger)", fontWeight: 600 }}>
                 <Trash2 size={15} />{tx("O'chirish")}
               </button>
             </div>
@@ -569,23 +682,32 @@ export default function ProductDetail({ productId, onBack }) {
             },
             {
               icon: Package,
-              label: t("productDetail.kpi.stockLeft", "Ombordagi qoldiq"),
-              value: `${product.stock} ${product.measurementUnit || (product.measurementType === "weight" ? "kg" : t("productDetail.kpi.unit", "dona"))}`,
-              color: product.stock < 10 ? "var(--danger)" : "var(--violet)",
+              label: "Yaroqlilar",
+              value: `${usableStock} ${product.measurementUnit || (product.measurementType === "weight" ? "kg" : t("productDetail.kpi.unit", "dona"))}`,
+              color: usableStock < 10 ? "var(--danger)" : "var(--violet)",
               bg:
-                product.stock < 10
+                usableStock < 10
                   ? "var(--danger-light)"
                   : "var(--violet-light)",
             },
             {
               icon: Package,
               label: "Braklar",
-              value: `${defectiveStock} ${t("productDetail.kpi.unit", "dona")}`,
+              value: `${defectiveStock} ${product.measurementUnit || (product.measurementType === "weight" ? "kg" : t("productDetail.kpi.unit", "dona"))}`,
               color: "var(--danger)",
               bg: "var(--danger-light)",
+              isDefectCount: true,
+            },
+            {
+              icon: Package,
+              label: "Umumiy soni",
+              value: `${totalStock} ${product.measurementUnit || (product.measurementType === "weight" ? "kg" : t("productDetail.kpi.unit", "dona"))}`,
+              color: "var(--brand)",
+              bg: "var(--brand-light)",
+              fullWidth: true,
             },
           ].map((k) => (
-            <div key={k.label} className="card p-4">
+            <div key={k.label} className={`card p-4${k.fullWidth ? " col-span-2" : ""}${animateDefectCount && k.isDefectCount ? " pd-defect-count-pulse" : ""}`}>
               <div
                 className="p-2.5 rounded-xl w-fit mb-3"
                 style={{
@@ -978,10 +1100,40 @@ export default function ProductDetail({ productId, onBack }) {
             <Field label={tx("SKU kodi")}><input className="input-base" value={editForm.sku || ""} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} /></Field>
             <Field label={tx("Kategoriya")}><input className="input-base" value={editForm.category || ""} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} /></Field>
             <Field label={tx("Qoldiq")}><input type="number" min="0" className="input-base" value={editForm.stock ?? ""} onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })} /></Field>
-            <Field label={tx("Sotuv narxi")}><input placeholder="0" type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.price, false)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /></Field>
-            <Field label={tx("Tan narxi")}><input placeholder="0" type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.cost, false)} onChange={(e) => setEditForm({ ...editForm, cost: String(toBaseMoney(e.target.value)) })} /></Field>
+            <Field label={tx("Sotuv narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.price, true)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
+            <Field label={tx("Tan narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.cost, true)} onChange={(e) => setEditForm({ ...editForm, cost: String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
           </div>
+          <section className="rounded-xl p-4" style={{ background: "var(--danger-light)", border: "1px solid var(--danger-border)" }}>
+            <div className="mb-3"><b className="text-sm" style={{ color: "var(--danger)" }}>{tx("Braklarni boshqarish")}</b><p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Qo'shish miqdori joriy brak soniga qo'shiladi. Yangi kirim bo'lsa ombor qoldig'i ham ortadi.")}</p></div>
+            <div className="mb-3 rounded-lg px-3 py-2 text-sm" style={{ background: "color-mix(in srgb, var(--danger) 7%, transparent)", color: "var(--text-secondary)" }}>
+              {tx("Hozirgi brak miqdori")}: <b style={{ color: "var(--danger)" }}>{defectiveStock} {tx(product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"))}</b>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3" role="group" aria-label={tx("Brak amali")}>
+              {[{ value: "add", label: "Brak qo'shish" }, { value: "reduce", label: "Brakni kamaytirish" }].map((action) => (
+                <button key={action.value} type="button" aria-pressed={(editForm.defectAction || "add") === action.value} onClick={() => setEditForm({ ...editForm, defectAction: action.value })} className="rounded-lg px-3 py-2 text-sm font-semibold" style={{ border: `1px solid ${(editForm.defectAction || "add") === action.value ? "var(--danger)" : "var(--border)"}`, background: (editForm.defectAction || "add") === action.value ? "var(--surface)" : "transparent", color: (editForm.defectAction || "add") === action.value ? "var(--danger)" : "var(--text-muted)" }}>{tx(action.label)}</button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label={tx(editForm.defectAction === "reduce" ? "Kamaytiriladigan brak miqdori" : "Qo'shiladigan brak miqdori")}><input type="number" min="0" step="any" className="input-base" value={editForm.defectiveStock ?? ""} onChange={(e) => setEditForm({ ...editForm, defectiveStock: e.target.value })} /></Field>
+              {editForm.defectAction !== "reduce" && <label className="flex items-center gap-2 self-end rounded-lg px-3 py-3 text-xs" style={{ background: "var(--surface)", color: "var(--text-secondary)" }}><input type="checkbox" checked={editForm.addDefectToStock !== false} onChange={(e) => setEditForm({ ...editForm, addDefectToStock: e.target.checked })} />{tx("Yangi brak miqdorini ombor qoldig'iga qo'shish")}</label>}
+              {editForm.defectAction !== "reduce" && <>
+                <Field label={tx("Brak tan narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.defectUnitPrice, true)} onChange={(e) => setEditForm({ ...editForm, defectUnitPrice: e.target.value === "" ? "" : String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
+                <Field label={tx("Brak sotuv narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.defectSalePrice, true)} onChange={(e) => setEditForm({ ...editForm, defectSalePrice: e.target.value === "" ? "" : String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
+              </>}
+            </div>
+            <p className="mt-3 text-xs" style={{ color: "var(--text-secondary)" }}>{tx("Saqlangandan keyin")}: {tx("Braklar")} <b>{plannedDefectTotal}</b> · {tx("Ombordagi qoldiq")} <b>{plannedStockTotal}</b></p>
+          </section>
           <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost cursor-pointer" onClick={() => setIsEditOpen(false)}>{tx("Bekor qilish")}</button><button type="button" className="btn-primary cursor-pointer" onClick={saveEdit}><Edit2 size={15} />{tx("Saqlash")}</button></div>
+        </div>
+      </Modal>
+      <Modal contentOnly open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} title="O'chirishni tasdiqlang" icon={Trash2} width={440}>
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{tx("Haqiqatan ham ushbu mahsulotni o'chirmoqchimisiz?")}</p>
+          <div className="rounded-xl px-4 py-3 font-semibold text-sm" style={{ background: "var(--surface-2)", color: "var(--text-primary)" }}>{product.name}</div>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setDeleteConfirmOpen(false)}>{tx("Yo'q")}</button>
+            <button type="button" className="btn-primary" style={{ background: "var(--danger)" }} onClick={deleteProduct}><Trash2 size={15}/>{tx("Ha, o'chirish")}</button>
+          </div>
         </div>
       </Modal>
       <SupplierReturnForm draft={returnDraft} setDraft={setReturnDraft} confirming={returnConfirming} setConfirming={setReturnConfirming} close={() => { setReturnDraft(null); setReturnConfirming(false); }} confirm={confirmProductReturn} />

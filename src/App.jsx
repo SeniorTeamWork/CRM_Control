@@ -113,9 +113,13 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
     );
   }
   if (page.startsWith("product-")) {
-    const id = page.replace("product-", "");
+    const opensDefectEditor = page.startsWith("product-defect-edit-");
+    const openedFromDefects = page.startsWith("product-defect-");
+    const id = opensDefectEditor
+      ? page.slice("product-defect-edit-".length)
+      : openedFromDefects ? page.slice("product-defect-".length) : page.replace("product-", "");
     return (
-      <ProductDetail productId={id} onBack={onBack} />
+      <ProductDetail productId={id} onBack={onBack} animateDefectCount={openedFromDefects} openDefectEditor={opensDefectEditor} />
     );
   }
   if (page.startsWith("supplier-")) {
@@ -181,7 +185,7 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
       if (!canAccess(user, "defective-products")) return null;
       return <>
         <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
-        <DefectiveProducts onSellDefect={onSellDefect} />
+        <DefectiveProducts onSellDefect={onSellDefect} onNavigate={navigateFromSaleSection} />
       </>;
     }
     return null;
@@ -209,7 +213,7 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
     case "products-all":
       return <Products onNavigate={onNavigate} />;
     case "defective-products":
-      return <DefectiveProducts onSellDefect={onSellDefect} />;
+      return <DefectiveProducts onSellDefect={onSellDefect} onNavigate={onNavigate} />;
     case "categories":
       return (
         <Placeholder
@@ -574,9 +578,11 @@ export default function App() {
       });
     };
     window.addEventListener("storage", refreshEmployee);
+    window.addEventListener("crm-employees-updated", refreshEmployee);
     window.addEventListener("focus", refreshEmployee);
     return () => {
       window.removeEventListener("storage", refreshEmployee);
+      window.removeEventListener("crm-employees-updated", refreshEmployee);
       window.removeEventListener("focus", refreshEmployee);
     };
   }, []);

@@ -67,7 +67,7 @@ const defectSaleRows = (product) => {
     defectLotQuantity: Math.max(0, Number(defect.quantity) || 0),
     defectStatus: "Brak",
     defectReason: defect.reason || "",
-    defectPrice: Number(defect.salePrice ?? defect.sellingPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
+    defectPrice: Number(defect.salePrice ?? defect.sellingPrice ?? product.defectSalePrice ?? product.defectPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
   })).filter((row) => row.defectLotQuantity > 0);
   const recordedQuantity = defects.reduce((sum, defect) => sum + Math.max(0, Number(defect.quantity) || 0), 0);
   const unrecordedQuantity = Math.max(0, Number(product?.defectiveStock || 0) - recordedQuantity);
@@ -77,7 +77,7 @@ const defectSaleRows = (product) => {
     defectLotQuantity: unrecordedQuantity,
     defectStatus: "Brak",
     defectReason: "",
-    defectPrice: Number(product.price ?? product.cost ?? 0),
+    defectPrice: Number(product.defectSalePrice ?? product.defectPrice ?? product.price ?? product.cost ?? 0),
   });
   return rows;
 };

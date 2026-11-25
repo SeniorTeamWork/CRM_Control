@@ -17,6 +17,9 @@ export default function Modal({
   children,
   width = 520,
   contentOnly = false,
+  backdropBlur = true,
+  backdropOpacity = 0.4,
+  backdropBlurAmount = 6,
 }) {
   useUILanguage();
   // Yopilganda oyna teskari animatsiya tugaguncha ko'rinib turadi; tarkibi oxirgi holatda "muzlatiladi",
@@ -66,9 +69,9 @@ export default function Modal({
         position: contentOnly ? "absolute" : "fixed",
         inset: 0,
         zIndex: 200,
-        background: contentOnly ? "rgba(15, 23, 42, 0.4)" : "transparent",
-        backdropFilter: contentOnly ? "blur(6px)" : undefined,
-        WebkitBackdropFilter: contentOnly ? "blur(6px)" : undefined,
+        background: contentOnly ? `rgba(15, 23, 42, ${backdropOpacity})` : "transparent",
+        backdropFilter: contentOnly && backdropBlur ? `blur(${backdropBlurAmount}px)` : undefined,
+        WebkitBackdropFilter: contentOnly && backdropBlur ? `blur(${backdropBlurAmount}px)` : undefined,
         pointerEvents: "auto",
         boxSizing: "border-box",
         overflow: "hidden",

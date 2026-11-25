@@ -68,6 +68,21 @@
   .table-row-hover:hover {
     background-color: var(--table-stripe);
   }
+
+  .defective-product-row {
+    cursor: pointer;
+    transition: background-color 160ms ease;
+  }
+
+  .defective-product-row:hover,
+  .defective-product-row:focus-visible {
+    background-color: var(--table-stripe);
+  }
+
+  .defective-product-row:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
+  }
   
   .input-base {
     width: 100%;
@@ -217,7 +232,7 @@
     white-space: normal;
   }
 
-  /* The defective products list has nine columns, so keep that table inside
+  /* The defective products list has eleven columns, so keep that table inside
      its card and let cell contents wrap instead of creating a sideways scroll. */
   .defective-products-page .returns-table-scroll {
     overflow-x: hidden;

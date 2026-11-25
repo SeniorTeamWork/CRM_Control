@@ -161,9 +161,21 @@ export default function EmployeeDetail({ employeeId, onBack }) {
     success("Xodim yangilandi", form.name);
   };
   const doDelete = () => {
-    setShowDelete(false);
-    success("Xodim o'chirildi", data.name);
-    if (onBack) onBack();
+    try {
+      const employees = readEmployees();
+      const remainingEmployees = employees.filter((employee) => String(employee.id) !== String(data.id));
+      if (remainingEmployees.length === employees.length) {
+        error("Xodim topilmadi", "Xodimlar ro'yxatini yangilang va qayta urinib ko'ring.");
+        return;
+      }
+      saveEmployees(remainingEmployees);
+      window.dispatchEvent(new CustomEvent("crm-employees-updated", { detail: { employeeId: data.id } }));
+      setShowDelete(false);
+      success("Xodim o'chirildi", data.name);
+      if (onBack) onBack();
+    } catch {
+      error("Xodim o'chirilmadi", "Ma'lumot saqlanmadi. Qayta urinib ko'ring.");
+    }
   };
 
   const recordSalaryPayment = (event) => {

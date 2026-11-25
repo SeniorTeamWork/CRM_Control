@@ -513,3 +513,16 @@
 .pd-product-return-button { display: inline-flex; min-height: 42px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid var(--danger-border); border-radius: 11px; background: var(--danger-light); color: var(--danger); font-size: 13px; font-weight: 700; cursor: pointer; }
 .pd-product-return-button:hover { filter: brightness(.98); }
 @media (max-width: 560px) { .pd-product-detail-header { align-items: flex-start; flex-direction: column; } .pd-product-return-button { width: 100%; } }
+
+.pd-defect-count-pulse {
+  animation: pd-defect-count-pulse 1.2s ease-in-out 4;
+}
+
+@keyframes pd-defect-count-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .58; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pd-defect-count-pulse { animation: none; }
+}

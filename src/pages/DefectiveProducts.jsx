@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RotateCcw, Search, ShoppingCart } from "lucide-react";
+import { AlertTriangle, Package, RotateCcw, Search, ShoppingCart, Truck } from "lucide-react";
 import DateRangeFilter, { matchesDateRange } from "../components/DateRangeFilter";
 import SalesProductFilter from "../components/SalesProductFilter";
 import Modal from "../components/Modal";
@@ -8,9 +8,11 @@ import { calculateReturn, returnLimits, reduceReturnStock, supplierOutstanding, 
 import { reservedQuantitiesByCondition } from "../data/ordersStore";
 import { formatCurrency } from "../data/currency";
 import { normalizeProductText, saleMatchesProduct } from "../data/salesProductFilter";
+import { supplierReceivedProductData } from "../data/supplierReceivedProducts";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import { translateText as tx } from "../locales/translateText";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
+import { getSuppliers } from "../supabase/bolimlar/taminotchilar";
 import { getData, setData } from "../supabase/db";
 import { useToast } from "../context/ToastContext";
 import "./Returns.css";
@@ -33,10 +35,12 @@ const readProducts = () => {
   }
 };
 
-export default function DefectiveProducts({ onSellDefect }) {
+export default function DefectiveProducts({ onSellDefect, onNavigate }) {
   useUILanguage();
   const [products, setProducts] = useState(readProducts);
   const [returnPickerOpen, setReturnPickerOpen] = useState(false);
+  const [defectSupplierPickerOpen, setDefectSupplierPickerOpen] = useState(false);
+  const [defectSupplierQuery, setDefectSupplierQuery] = useState("");
   const [returnDraft, setReturnDraft] = useState(null);
   const [returnConfirming, setReturnConfirming] = useState(false);
   const [returnReceipt, setReturnReceipt] = useState(null);
@@ -46,6 +50,12 @@ export default function DefectiveProducts({ onSellDefect }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [suppliers] = useState(() => {
+    try {
+      const saved = getSuppliers(null);
+      return Array.isArray(saved) ? saved : [];
+    } catch { return []; }
+  });
 
   useEffect(() => {
     const refresh = () => setProducts(readProducts());
@@ -70,9 +80,9 @@ export default function DefectiveProducts({ onSellDefect }) {
       reason: defect.reason || "Sabab ko'rsatilmagan",
       status: defect.status || "Brak",
       measurementUnit: defect.measurementUnit || product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"),
-      unitPrice: Number(defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
-      salePrice: Number(defect.salePrice ?? defect.sellingPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
-      total: Number(defect.total) || Number(defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0) * (Number(defect.quantity) || 0),
+      unitPrice: Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? product.cost ?? 0),
+      salePrice: Number(defect.salePrice ?? defect.sellingPrice ?? product.defectSalePrice ?? product.defectPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
+      total: Number(defect.total) || Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? product.cost ?? 0) * (Number(defect.quantity) || 0),
       date: defect.date || product.createdAt || "",
     }));
     if (unrecordedQuantity > 0) rows.push({
@@ -84,9 +94,9 @@ export default function DefectiveProducts({ onSellDefect }) {
       reason: "Sabab ko'rsatilmagan",
       status: "Brak",
       measurementUnit: product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"),
-      unitPrice: Number(product.price ?? product.cost ?? 0),
-      salePrice: Number(product.defectPrice ?? product.price ?? product.cost ?? 0),
-      total: unrecordedQuantity * Number(product.price ?? product.cost ?? 0),
+      unitPrice: Number(product.defectUnitPrice ?? product.cost ?? 0),
+      salePrice: Number(product.defectSalePrice ?? product.defectPrice ?? product.price ?? product.cost ?? 0),
+      total: unrecordedQuantity * Number(product.defectUnitPrice ?? product.cost ?? 0),
       date: product.createdAt || "",
     });
     return rows;
@@ -99,6 +109,34 @@ export default function DefectiveProducts({ onSellDefect }) {
     const day = Number.isNaN(date.getTime()) ? String(item.date || "").slice(0, 10) : [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
     return (matchesText || !query) && saleMatchesProduct({ items: [{ id: item.productId, name: item.product, category: item.category }] }, products, categoryFilter) && matchesDateRange(day, dateFrom, dateTo);
   });
+  const supplierReceiptIndex = useMemo(() => {
+    const receipts = readList("crm_supplier_receipts");
+    return new Map(suppliers.map((supplier) => [String(supplier.id), supplierReceivedProductData(
+      supplier,
+      products,
+      readList(`crm_supplier_orders_${supplier.id}`),
+      receipts
+    )]));
+  }, [suppliers, products]);
+  const defectSupplierMatches = suppliers.filter((supplier) => {
+    const terms = normalizeProductText(defectSupplierQuery).split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const receiptInfo = supplierReceiptIndex.get(String(supplier.id)) || { products: [], lines: [] };
+    const searchableText = normalizeProductText([
+      supplier.id, supplier.name, supplier.phone, supplier.address,
+      ...receiptInfo.products.flatMap((product) => [product.id, product.sku, product.name, product.category, product.brand]),
+      ...receiptInfo.lines.flatMap((line) => [line.id, line.productId, line.sku, line.name, line.productName, line.category, line.brand]),
+    ].filter((value) => value != null).join(" "));
+    return terms.every((term) => searchableText.includes(term));
+  });
+  const defectProductMatches = useMemo(() => {
+    const terms = normalizeProductText(defectSupplierQuery).split(/\s+/).filter(Boolean);
+    if (!terms.length) return [];
+    return products.filter((product) => terms.every((term) =>
+      [product.id, product.sku, product.name, product.brand, product.category]
+        .some((value) => normalizeProductText(value).includes(term))
+    )).slice(0, 8);
+  }, [defectSupplierQuery, products]);
 
   const now = new Date();
   const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
@@ -271,9 +309,14 @@ export default function DefectiveProducts({ onSellDefect }) {
           <h1 className="font-display font-bold text-2xl text-primary-color">{tx("Brak mahsulotlar")}</h1>
           <p className="text-sm mt-0.5 text-muted-color">{tx("Brak deb belgilangan tovarlar va qaydlar")}</p>
         </div>
-        <button type="button" className="btn-ghost" onClick={() => setReturnPickerOpen(true)} disabled={returnProducts.length === 0} style={{ color: "var(--danger)", borderColor: "var(--danger-border)" }}>
-          <RotateCcw size={15} />{tx("Tovarni qaytarish")}
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-primary" onClick={() => { setDefectSupplierQuery(""); setDefectSupplierPickerOpen(true); }}>
+            <AlertTriangle size={15} />{tx("Brak qo'shish")}
+          </button>
+          <button type="button" className="btn-ghost" onClick={() => setReturnPickerOpen(true)} disabled={returnProducts.length === 0} style={{ color: "var(--danger)", borderColor: "var(--danger-border)" }}>
+            <RotateCcw size={15} />{tx("Tovarni qaytarish")}
+          </button>
+        </div>
       </div>
 
       <div className="returns-stats grid grid-cols-4 gap-3">
@@ -310,29 +353,67 @@ export default function DefectiveProducts({ onSellDefect }) {
           <table className="returns-table defective-products-table w-full">
             <thead>
               <tr className="table-header-row">
-                {["ID", "Mahsulot", "Kategoriya", "Miqdor", "Sabab", "Summa", "Sana", "Holat", "Amal"].map((heading) => (
+                {["ID", "Mahsulot", "Kategoriya", "Miqdor", "Brak tan narxi", "Brak sotuv narxi", "Sabab", "Summa", "Sana", "Holat", "Amal"].map((heading) => (
                   <th key={heading} className="text-left px-5 py-3 text-xs font-semibold text-faint-color">{tx(heading)}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? <tr><td colSpan={9} className="px-5 py-10 text-center text-sm text-muted-color">{tx("Brak mahsulotlar topilmadi")}</td></tr> : filtered.map((item) => (
-                <tr key={item.id} className="border-t border-subtle">
+              {filtered.length === 0 ? <tr><td colSpan={11} className="px-5 py-10 text-center text-sm text-muted-color">{tx("Brak mahsulotlar topilmadi")}</td></tr> : filtered.map((item) => (
+                <tr
+                  key={item.id}
+                  className="border-t border-subtle defective-product-row"
+                  tabIndex={onNavigate ? 0 : undefined}
+                  onClick={() => onNavigate?.(`product-defect-${item.productId}`)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onNavigate?.(`product-defect-${item.productId}`);
+                    }
+                  }}
+                >
                   <td className="px-3 py-2.5 text-xs text-muted-color">{item.productId ?? "—"}</td>
                   <td className="px-3 py-2.5 text-sm font-medium text-primary-color">{tx(item.product)}</td>
                   <td className="px-3 py-2.5 text-sm text-secondary-color">{tx(item.category)}</td>
                   <td className="px-3 py-2.5 text-sm font-semibold text-primary-color">{tx(item.quantity)}{tx(item.measurementUnit || products.find((product) => String(product.id) === String(item.productId))?.measurementUnit || (products.find((product) => String(product.id) === String(item.productId))?.measurementType === "weight" ? " kg" : " dona"))}</td>
+                  <td className="px-3 py-2.5 text-sm text-secondary-color">{formatCurrency(item.unitPrice)}</td>
+                  <td className="px-3 py-2.5 text-sm font-semibold text-primary-color">{formatCurrency(item.salePrice)}</td>
                   <td className="px-3 py-2.5 text-sm text-secondary-color"><span>{tx(item.reason)}</span><span className="block text-xs text-faint-color">{tx(item.status)}</span></td>
                   <td className="px-3 py-2.5 text-sm font-medium text-primary-color">{formatCurrency(item.total)}</td>
                   <td className="px-3 py-2.5 text-sm text-secondary-color">{item.date ? new Date(item.date).toLocaleDateString("uz-UZ") : "—"}</td>
                   <td className="px-3 py-2.5"><span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ color: "var(--danger)", background: "color-mix(in srgb, var(--danger) 10%, transparent)" }}>{tx(item.status)}</span></td>
-                  <td className="px-3 py-2.5"><button type="button" className="btn-primary defective-products-sell-button text-xs justify-center" onClick={() => onSellDefect?.({ ...item, defectId: String(item.id), defectPrice: item.salePrice })} disabled={!item.quantity || item.salePrice < 0}><ShoppingCart size={14} />{tx("Sotish")}</button></td>
+                  <td className="px-3 py-2.5"><button type="button" className="btn-primary defective-products-sell-button text-xs justify-center" onClick={(event) => { event.stopPropagation(); onSellDefect?.({ ...item, defectId: String(item.id), defectPrice: item.salePrice }); }} disabled={!item.quantity || item.salePrice < 0}><ShoppingCart size={14} />{tx("Sotish")}</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+      <Modal contentOnly backdropOpacity={0.76} backdropBlurAmount={9} open={defectSupplierPickerOpen} onClose={() => setDefectSupplierPickerOpen(false)} title="Brak qo'shish" subtitle="Ta'minotchi yoki mahsulotni tanlang" icon={AlertTriangle} width={560}>
+        <div className="space-y-3">
+          <label className="block" style={{ position: "relative" }}><input autoFocus className="input-base pl-3 pr-16" value={defectSupplierQuery} onChange={(event) => setDefectSupplierQuery(event.target.value)} placeholder={tx("ID, kategoriya, ta'minotchi yoki tovar nomi bo'yicha qidirish")}/><Search size={16} style={{ position: "absolute", right: 42, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }}/><Truck size={17} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--brand)" }}/></label>
+          <div className="max-h-96 space-y-3 overflow-y-auto">
+            {!!defectSupplierMatches.length && <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{tx("Ta'minotchilar")}</h3>
+            {defectSupplierMatches.map((supplier) => {
+              const linkedProducts = supplierReceiptIndex.get(String(supplier.id))?.products || [];
+              return <button key={supplier.id} type="button" onClick={() => { setDefectSupplierPickerOpen(false); onNavigate?.(`supplier-${supplier.id}`); }} className="w-full rounded-xl p-3 text-left transition-colors" style={{ border: "1px solid var(--border)", background: "var(--surface-2)", boxShadow: "0 1px 2px rgba(15,23,42,.05)" }}>
+                <span className="flex items-center justify-between gap-3"><span><b className="block">{supplier.name || tx("Nomsiz ta'minotchi")}</b><small className="mt-1 block" style={{ color: "var(--text-muted)" }}>{supplier.phone || tx("Telefon ko'rsatilmagan")} · {tx("ID")}: {supplier.id}</small></span></span>
+                <small className="mt-2 block" style={{ color: "var(--text-muted)" }}>{linkedProducts.length} {tx("ta mahsulot")}{linkedProducts.length ? ` · ${linkedProducts.slice(0, 3).map((product) => `${product.name} (${product.category || tx("Kategoriya yo'q")})`).join(" · ")}` : ""}</small>
+              </button>;
+            })}
+            </section>}
+            {!!defectProductMatches.length && <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{tx("Mahsulotlar")}</h3>
+              {defectProductMatches.map((product) => <button key={product.id} type="button" onClick={() => { setDefectSupplierPickerOpen(false); onNavigate?.(`product-defect-edit-${product.id}`); }} className="w-full rounded-xl p-3 text-left transition-colors" style={{ border: "1px solid var(--border)", background: "var(--surface-2)" }}>
+                <span className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><Package size={17} style={{ color: "var(--brand)", flexShrink: 0 }}/><span className="min-w-0"><b className="block truncate">{product.name}</b><small className="mt-1 block" style={{ color: "var(--text-muted)" }}>{tx("ID")}: {product.id} · {tx("Kategoriya")}: {product.category || tx("Kategoriya yo'q")}</small></span></span><span className="shrink-0 text-right text-xs" style={{ color: "var(--danger)" }}>{tx("Brak")}: {Number(product.defectiveStock || 0)} {tx(product.measurementUnit || "dona")}</span></span>
+              </button>)}
+            </section>}
+            {!defectSupplierMatches.length && !defectProductMatches.length && <p className="p-5 text-center text-sm" style={{ color: "var(--text-muted)" }}>{tx("Mos ta'minotchi yoki mahsulot topilmadi")}</p>}
+          </div>
+        </div>
+      </Modal>
       <Modal contentOnly open={returnPickerOpen} onClose={() => setReturnPickerOpen(false)} title="Qaytariladigan mahsulotni tanlang" subtitle="Ta’minotchiga qaytariladigan brak mahsulotni tanlang" icon={RotateCcw} width={520}>
         <div className="space-y-2">
           {returnProducts.map((item) => (

@@ -17,6 +17,8 @@ import {
   PackagePlus,
   Save,
   AlertTriangle,
+  Truck,
+  Search,
 } from "lucide-react";
 
 import { useToast } from "../context/ToastContext";
@@ -41,6 +43,8 @@ export default function Products({ onNavigate }) {
       return Array.isArray(saved) ? saved : [];
     } catch { return []; }
   });
+  const [defectSupplierOpen, setDefectSupplierOpen] = useState(false);
+  const [defectSupplierQuery, setDefectSupplierQuery] = useState("");
 
   /* =====================================================
      STATUS
@@ -168,6 +172,7 @@ export default function Products({ onNavigate }) {
         p.name,
         p.category,
         p.country,
+        p.supplierName,
         countryByBrand[p.brand],
       ];
 
@@ -180,6 +185,14 @@ export default function Products({ onNavigate }) {
         sensitivity: "base",
       })
     );
+
+  const defectSupplierMatches = suppliers.filter((supplier) => {
+    const query = defectSupplierQuery.trim().toLocaleLowerCase("uz-UZ");
+    if (!query) return true;
+    const supplierProducts = productList.filter((product) => String(product.supplierId) === String(supplier.id) || String(product.supplierName || "").toLocaleLowerCase("uz-UZ") === String(supplier.name || "").toLocaleLowerCase("uz-UZ"));
+    return [supplier.id, supplier.name, supplier.phone, supplier.address, ...supplierProducts.flatMap((product) => [product.id, product.sku, product.name, product.category, product.brand])]
+      .some((value) => String(value ?? "").toLocaleLowerCase("uz-UZ").includes(query));
+  });
 
   /* =====================================================
      EXPORT
@@ -404,6 +417,14 @@ export default function Products({ onNavigate }) {
         </div>
 
         <div className="flex items-center gap-2">
+
+          <button
+            type="button"
+            onClick={() => { setDefectSupplierQuery(""); setDefectSupplierOpen(true); }}
+            className="btn-primary text-sm cursor-pointer"
+          >
+            <AlertTriangle size={14} />{tx("Brak qo'shish")}
+          </button>
 
           <button
             type="button"
@@ -1161,6 +1182,28 @@ export default function Products({ onNavigate }) {
           DELETE MODAL
           ENDI PORTAL EMAS
       ================================================= */}
+
+      {defectSupplierOpen && modalRoot && createPortal(
+        <div className="motion-overlay" onClick={() => setDefectSupplierOpen(false)} style={{ position: "absolute", inset: 0, zIndex: 210, pointerEvents: "auto", background: "rgba(15,23,42,.76)", backdropFilter: "blur(9px)", WebkitBackdropFilter: "blur(9px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <section role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()} className="card" style={{ width: "100%", maxWidth: 560, maxHeight: "85vh", overflow: "auto", padding: 20, boxShadow: "var(--shadow-lg)" }}>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div><h2 className="font-display font-bold text-lg">{tx("Brak qo'shish")}</h2><p className="text-sm mt-1 text-muted-color">{tx("Ta'minotchini tanlang va uning profilida brakni tahrirlang")}</p></div>
+              <button type="button" className="btn-ghost" aria-label={tx("Yopish")} onClick={() => setDefectSupplierOpen(false)}><X size={16}/></button>
+            </div>
+            <label className="block mb-3" style={{ position: "relative" }}><input autoFocus className="input-base pl-3 pr-16" value={defectSupplierQuery} onChange={(event) => setDefectSupplierQuery(event.target.value)} placeholder={tx("ID, kategoriya, ta'minotchi yoki tovar nomi bo'yicha qidirish")}/><Search size={16} style={{ position: "absolute", right: 42, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }}/><Truck size={17} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--brand)" }}/></label>
+            <div className="space-y-2">
+              {defectSupplierMatches.map((supplier) => {
+                const linkedProducts = productList.filter((product) => String(product.supplierId) === String(supplier.id) || String(product.supplierName || "").toLocaleLowerCase("uz-UZ") === String(supplier.name || "").toLocaleLowerCase("uz-UZ"));
+                return <button key={supplier.id} type="button" onClick={() => { setDefectSupplierOpen(false); onNavigate?.(`supplier-${supplier.id}`); }} className="w-full rounded-xl p-3 text-left transition-colors" style={{ border: "1px solid var(--border)", background: "var(--surface-2)", boxShadow: "0 1px 2px rgba(15,23,42,.05)" }}>
+                  <span className="flex items-center justify-between gap-3"><span><b className="block">{supplier.name || tx("Nomsiz ta'minotchi")}</b><small className="block mt-1 text-muted-color">{supplier.phone || tx("Telefon ko'rsatilmagan")} · {tx("ID")}: {supplier.id}</small></span></span>
+                  <small className="block mt-2 text-muted-color">{linkedProducts.length} {tx("ta mahsulot")}{linkedProducts.length > 0 ? ` · ${linkedProducts.slice(0, 3).map((item) => `${item.name} (${item.category || tx("Kategoriya yo'q")})`).join(" · ")}` : ` · ${tx("Mahsulotlar ta'minotchi profilida ko'rinadi")}`}</small>
+                </button>;
+              })}
+              {!defectSupplierMatches.length && <p className="p-5 text-center text-sm text-muted-color">{tx("Mos ta'minotchi yoki mahsulot topilmadi")}</p>}
+            </div>
+          </section>
+        </div>, modalRoot
+      )}
 
       {deleteTarget && modalRoot && createPortal(
         <div
