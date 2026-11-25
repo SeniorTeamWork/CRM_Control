@@ -3,6 +3,7 @@ import { CalendarClock, CheckCircle2, ClipboardList, Download, FileText, MapPin,
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatCurrency } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
 import { readDebtPayments, readPosSales, withDebtBalance } from "../data/debtPayments";
 import { ADDITIONAL_SALES_KEY, getReturns, getSales, SALES_KEY, saveSales } from "../supabase/bolimlar/sotuvlar";
 import { useDataVersion } from "../supabase/db";
@@ -142,7 +143,7 @@ export default function PendingPickups() {
   return (
     <section className="pending-pickups-page">
       <header className="pending-pickups-heading">
-        <div><span>{tx("YETKAZIB BERISH")}</span><h1>{tx("Kutishdagi tovarlar")}</h1><p>{tx("Olish sanasi belgilangan va hali topshirilmagan mahsulotlar")}</p></div>
+        <div><span>{tx("YETKAZIB BERISH")}</span><h1>{tx("Yetkazib berish")}</h1><p>{tx("Olish sanasi belgilangan va hali topshirilmagan mahsulotlar")}</p></div>
       </header>
 
       <div className="pending-pickups-stats">
@@ -192,7 +193,7 @@ export default function PendingPickups() {
             ].map(([label, value]) => <div key={label}><small>{tx(label)}</small><b>{value}</b></div>)}
           </div>
           <div className="pending-pickup-detail-items">
-            <div className="pending-pickup-detail-section-title"><h3>{tx("Mahsulotlar")}</h3><span>{selectedSale.pendingItems.length} {tx("xil kutayotgan mahsulot")}</span></div>
+            <div className="pending-pickup-detail-section-title"><h3>{tx("Mahsulotlar")}</h3><span>{uniqueProductCount(selectedSale.pendingItems)} {tx("xil kutayotgan mahsulot")}</span></div>
             {selectedSale.items?.map((item, index) => {
               const pendingItem = selectedSale.pendingItems.find((waiting) => waiting.saleItemIndex === index);
               const quantity = pendingItem ? quantityOf(pendingItem) : quantityOf(item);

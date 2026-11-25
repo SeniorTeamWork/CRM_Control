@@ -26,9 +26,11 @@ export default function ReceivingCardSelect({ value, onChange, disabled = false 
         {cards.map((card) => <option key={card.id} value={card.id}>{formatCardNumber(card.number)} — {card.label || card.holder}</option>)}
       </select>
       {selected && <div className="receiving-card-preview">
-        <strong>{formatCardNumber(selected.number)}</strong>
+        <div className="receiving-card-preview-heading">
+          <strong>{formatCardNumber(selected.number)}</strong>
+          {selected.label && <small>{selected.label}</small>}
+        </div>
         <span>{selected.holder}</span>
-        {selected.label && <small>{selected.label}</small>}
       </div>}
       <p id={`${id}-hint`}>{tx(cards.length ? "Mijozga shu karta raqamini ayting. Pul tushganini tekshirib, to'lovni tasdiqlang." : "Direktor hali karta qo'shmagan. Sozlamalar → Profil bo'limida karta qo'shiladi.")}</p>
     </div>

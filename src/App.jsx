@@ -43,7 +43,7 @@ import Orders from "./pages/Orders";
 import PendingPickups from "./pages/PendingPickups";
 import Login from "./pages/Login";
 import { subscribeNotifications } from "./supabase/live";
-import { ACCESS_SECTIONS, canAccess, SESSION_KEY } from "./data/accessStore";
+import { ACCESS_SECTIONS, canAccess, clearSession, readSession, writeSession } from "./data/accessStore";
 import { readEmployees } from "./data/employeeStore";
 import { readProfile } from "./data/profileStore";
 import { prepareSaleReadyData } from "./data/saleReadyReset";
@@ -160,21 +160,25 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
       </>;
     }
     if (saleSection === "Qoralama") {
+      if (!canAccess(user, "drafts")) return null;
       return <Drafts onBack={() => setSaleSection("")} onNavigate={navigateFromSaleSection} />;
     }
     if (saleSection === "Band qilingan") {
+      if (!canAccess(user, "orders")) return null;
       return <>
         {!ordersProps.isEditorOpen && <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>}
         <Orders currentUser={user} onNavigate={navigateFromSaleSection} onBackButtonVisibilityChange={ordersProps.onBackButtonVisibilityChange} />
       </>;
     }
     if (saleSection === "Qaytmalar") {
+      if (!canAccess(user, "sales-returns")) return null;
       return <>
         <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
         <Returns />
       </>;
     }
     if (saleSection === "Brak" && defectCatalogOpen) {
+      if (!canAccess(user, "defective-products")) return null;
       return <>
         <button type="button" className="app-back-button" onClick={() => setSaleSection("")}><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button>
         <DefectiveProducts onSellDefect={onSellDefect} />
@@ -263,7 +267,7 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
 // ── Shell ────────────────────────────────────────────
 const detailPagePrefixes = ["customer-", "product-", "supplier-", "employee-", "debt-"];
 const browserRouteKey = "__uyMarketCrmRoute";
-const sectionStartPages = { sales: "sales-all", products: "products-all", customers: "customers-all", finance: "finance-revenue" };
+const sectionStartPages = { sales: "sales-all", products: "products-all", customers: "customers-all", finance: "finance-revenue", "orders-reservations": "orders", "suppliers-main": "suppliers" };
 
 function getFirstAllowedPage(user) {
   const section = ACCESS_SECTIONS.find((entry) => canAccess(user, entry.id));
@@ -439,6 +443,9 @@ function Shell({ onLogout, user, initialPage }) {
   };
 
   const selectSaleSection = (section) => {
+    const sectionPermissions = { "Qoralama": "drafts", "Band qilingan": "orders", "Qaytmalar": "sales-returns", "Brak": "defective-products", "Yetkazib berish": "pending-pickups" };
+    const requiredPermission = sectionPermissions[section] || (section.startsWith("page:") ? section.slice(5) : null);
+    if (requiredPermission && !canAccess(user, requiredPermission)) return;
     const targetWorkspace = page === "sales-new" || page === "sales-pos" ? page : "sales-new";
     setSelectedSaleSection(section);
     setSelectedSaleSectionWorkspace(targetWorkspace);
@@ -540,10 +547,9 @@ export default function App() {
     document.title = companyName;
     return () => { document.title = previousTitle; };
   }, [companyName]);
-  const [user, setUser] = useState(() => {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Login still starts fresh. */ }
-    return null;
-  });
+  // Sahifa yangilanganda (F5 / Ctrl+R) oldingi kirish tiklanadi; hisob ma'lumoti qayta tekshiriladi.
+  const [user, setUser] = useState(() => (isTenantPortal ? readSession() : null));
+  useEffect(() => { if (user) writeSession(user); else clearSession(); }, [user]);
   const [firstTenantSetup, setFirstTenantSetup] = useState(false);
   const [superAdmin, setSuperAdmin] = useState(hasAdminSession);
   useEffect(() => {

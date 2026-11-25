@@ -18,38 +18,53 @@ import {
   AlertTriangle,
   ShoppingCart,
 } from "lucide-react";
-import { customers } from "../data/mockData";
 import { useToast } from "../context/ToastContext";
-
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-const extraDebtors = [
-  { id: 10, name: "Timur Sobirov", phone: "+998 90 111 22 33", purchases: 5, spent: 1200000, debt: 180000, paid: 60000, dueDate: "25 Sep 2026", overdue: false, daysPast: 0, lastPurchase: "02 Sep 2026", status: "debtor", region: "Toshkent" },
-  { id: 11, name: "Umida Xoliqova", phone: "+998 91 222 33 44", purchases: 2, spent: 450000, debt: 90000, paid: 20000, dueDate: "15 Sep 2026", overdue: true, daysPast: 7, lastPurchase: "01 Sep 2026", status: "debtor", region: "Andijon" },
-  { id: 12, name: "Vohid Tursunov", phone: "+998 93 333 44 55", purchases: 9, spent: 2800000, debt: 560000, paid: 200000, dueDate: "10 Sep 2026", overdue: true, daysPast: 22, lastPurchase: "28 Aug 2026", status: "debtor", region: "Toshkent" },
-  { id: 13, name: "Xurshid Nishonov", phone: "+998 94 444 55 66", purchases: 3, spent: 620000, debt: 145000, paid: 50000, dueDate: "30 Sep 2026", overdue: false, daysPast: 0, lastPurchase: "05 Sep 2026", status: "debtor", region: "Samarqand" },
-];
-const allDebtors = [
-  ...customers.filter((c) => c.debt > 0).map((c) => ({
-    ...c,
-    paid: Math.floor(c.spent * 0.08),
-    dueDate: "20 Sep 2026",
-    overdue: c.debt > 300000,
-    daysPast: c.debt > 300000 ? 12 : 0,
-  })),
-  ...extraDebtors,
-];
+import { getCustomers, saveCustomers } from "../supabase/bolimlar/mijozlar";
+import { useDataVersion } from "../supabase/db";
+
+const paymentRows = (customer) => Array.isArray(customer?.debtPayments) ? customer.debtPayments : [];
+const dateLabel = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short", year: "numeric" });
+};
+const debtorSnapshot = (id) => {
+  const customer = getCustomers().find((item) => String(item.id) === String(id));
+  if (!customer) return null;
+  const payments = paymentRows(customer).slice().sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
+  const paid = payments.reduce((sum, payment) => sum + Math.max(0, Number(payment.amount) || 0), 0);
+  const currentDebt = Math.max(0, Number(customer.debt) || 0);
+  const dueDate = customer.debtDueDate || customer.dueDate || "—";
+  const due = new Date(dueDate);
+  const overdue = dueDate !== "—" && !Number.isNaN(due.getTime()) && due < new Date();
+  const daysPast = overdue ? Math.max(1, Math.ceil((Date.now() - due.getTime()) / 86400000)) : 0;
+  return {
+    ...customer,
+    debt: currentDebt + paid,
+    currentDebt,
+    paid,
+    payments,
+    dueDate: dateLabel(dueDate),
+    overdue,
+    daysPast,
+    lastPurchase: dateLabel(customer.lastPurchase),
+  };
+};
 
 export default function DebtDetail({ debtorId, onBack }) {
   useUILanguage();
-  const { success } = useToast();
+  const { success, error } = useToast();
+  const dataVersion = useDataVersion();
   const modalRoot = document.getElementById("main-modal-root");
   const modalDialogRef = useRef(null);
-  const initial = allDebtors.find((d) => d.id === debtorId) || allDebtors[0];
-  const [data, setData] = useState(initial);
+  const [data, setData] = useState(() => debtorSnapshot(debtorId));
   const [tab, setTab] = useState("payments");
   const [showPay, setShowPay] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+
+  useEffect(() => { setData(debtorSnapshot(debtorId)); }, [debtorId, dataVersion]);
 
   useEffect(() => {
     if (!showPay && !showEdit && !showDelete) return;
@@ -64,34 +79,83 @@ export default function DebtDetail({ debtorId, onBack }) {
     document.addEventListener("pointerdown", closeOnOutsideClick);
     return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, [showPay, showEdit, showDelete]);
-  const [payAmount, setPayAmount] = useState(initial.debt.toString());
+  const [payAmount, setPayAmount] = useState(() => String(debtorSnapshot(debtorId)?.currentDebt || 0));
   const [payMethod, setPayMethod] = useState("naqd");
-  const [paidList, setPaidList] = useState([
-    { id: "P-901", amount: 60000, method: "Naqd", date: "01 Sep 2026", note: "Birinchi to'lov" },
-    { id: "P-874", amount: 40000, method: "Karta", date: "25 Aug 2026", note: "" },
-  ]);
-  const [form, setForm] = useState({ name: initial.name, phone: initial.phone, debt: initial.debt });
+  const paidList = data?.payments || [];
+  const [form, setForm] = useState(() => {
+    const initial = debtorSnapshot(debtorId);
+    return { name: initial?.name || "", phone: initial?.phone || "", debt: initial?.debt || 0 };
+  });
 
-  const remaining = data.debt - paidList.reduce((s, p) => s + p.amount, 0);
+  useEffect(() => {
+    if (!data) return;
+    setForm({ name: data.name || "", phone: data.phone || "", debt: data.debt });
+    setPayAmount(String(data.currentDebt));
+  }, [data]);
+
+  const remaining = data?.currentDebt || 0;
+  const paidTotal = data?.paid || 0;
+  const activity = [
+    ...paidList.map((payment) => ({
+      t: `To'lov qabul qilindi — ${formatCurrency(payment.amount)}`,
+      time: dateLabel(payment.createdAt || payment.date),
+      timestamp: new Date(payment.createdAt || payment.date || 0).getTime() || 0,
+      icon: CheckCircle,
+      color: "var(--success)",
+    })),
+    ...(data.lastPurchase && data.lastPurchase !== "—" ? [{
+      t: `Yangi xarid — ${formatCurrency(data.spent || 0)}`,
+      time: data.lastPurchase,
+      timestamp: new Date(data.lastPurchase).getTime() || 0,
+      icon: ShoppingCart,
+      color: "var(--brand)",
+    }] : []),
+  ].sort((a, b) => b.timestamp - a.timestamp);
 
   const handlePay = () => {
-    const amt = Number(payAmount);
-    if (!amt || amt <= 0) return;
-    setPaidList((prev) => [{ id: "P-" + Date.now(), amount: amt, method: payMethod, date: "08 Sep 2026", note: "" }, ...prev]);
-    setShowPay(false);
-    success("To'lov qabul qilindi", data.name + " — " + formatCurrency(amt));
-    setPayAmount(data.debt.toString());
+    if (!data) return;
+    const amt = Math.min(remaining, Number(payAmount));
+    if (!Number.isFinite(amt) || amt <= 0) return;
+    const current = getCustomers();
+    const payment = { id: `P-${crypto.randomUUID()}`, amount: amt, method: payMethod, createdAt: new Date().toISOString(), note: "" };
+    const updated = { ...data, currentDebt: Math.max(0, remaining - amt), debtPayments: [payment, ...paidList] };
+    try {
+      saveCustomers(current.map((customer) => String(customer.id) === String(data.id) ? { ...customer, debt: updated.currentDebt, debtPayments: updated.debtPayments, status: updated.currentDebt > 0 ? "debtor" : "active" } : customer));
+      setData(debtorSnapshot(debtorId));
+      setShowPay(false);
+      success("To'lov qabul qilindi", data.name + " — " + formatCurrency(amt));
+    } catch {
+      error("To'lov saqlanmadi. Qayta urinib ko'ring.");
+    }
   };
   const saveEdit = () => {
-    setData((d) => ({ ...d, name: form.name, phone: form.phone, debt: Number(form.debt) }));
-    setShowEdit(false);
-    success("Qarzdor yangilandi", form.name);
+    if (!data) return;
+    const current = getCustomers();
+    const totalPaid = paidTotal;
+    const totalDebt = Math.max(totalPaid, Number(form.debt) || 0);
+    const updatedCustomer = { ...data, name: form.name.trim(), phone: form.phone.trim(), debt: Math.max(0, totalDebt - totalPaid), status: totalDebt > totalPaid ? "debtor" : "active" };
+    try {
+      saveCustomers(current.map((customer) => String(customer.id) === String(data.id) ? updatedCustomer : customer));
+      setData(debtorSnapshot(debtorId));
+      setShowEdit(false);
+      success("Qarzdor yangilandi", form.name);
+    } catch {
+      error("Qarzdor ma'lumoti saqlanmadi. Qayta urinib ko'ring.");
+    }
   };
   const doDelete = () => {
-    setShowDelete(false);
-    success("Qarzdor o'chirildi", data.name);
-    if (onBack) onBack();
+    if (!data) return;
+    try {
+      saveCustomers(getCustomers().filter((customer) => String(customer.id) !== String(data.id)));
+      setShowDelete(false);
+      success("Qarzdor o'chirildi", data.name);
+      if (onBack) onBack();
+    } catch {
+      error("Qarzdor o'chirilmadi. Qayta urinib ko'ring.");
+    }
   };
+
+  if (!data) return <div className="space-y-6 fade-in"><button type="button" onClick={onBack} className="app-back-button"><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button><div className="card p-6 text-sm" style={{ color: "var(--text-muted)" }}>{tx("Qarzdor topilmadi")}</div></div>;
 
   const tabs = [
     { key: "payments", label: "To'lovlar" },
@@ -171,7 +235,7 @@ export default function DebtDetail({ debtorId, onBack }) {
           <div className="grid grid-cols-2 gap-3">
             {[
               { label: "Jami qarz", value: formatCurrency(data.debt), icon: CreditCard, color: "var(--danger)", bg: "var(--danger-light)" },
-              { label: "To'langan", value: formatCurrency(paidList.reduce((s, p) => s + p.amount, 0)), icon: CheckCircle, color: "var(--success)", bg: "var(--success-light)" },
+              { label: "To'langan", value: formatCurrency(paidTotal), icon: CheckCircle, color: "var(--success)", bg: "var(--success-light)" },
               { label: "Qoldi", value: formatCurrency(remaining), icon: AlertTriangle, color: "var(--warning)", bg: "var(--warning-light)" },
               { label: "Muddat", value: data.overdue ? data.daysPast + " kun o'tdi" : data.dueDate, icon: Clock, color: data.overdue ? "var(--danger)" : "var(--text-muted)", bg: data.overdue ? "var(--danger-light)" : "var(--surface-2)" },
             ].map((c) => (
@@ -219,7 +283,7 @@ export default function DebtDetail({ debtorId, onBack }) {
                     <td className="px-5 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{p.id}</td>
                     <td className="px-5 py-3 text-sm font-semibold" style={{ color: "var(--success)" }}>{formatCurrency(p.amount)}</td>
                     <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{tx(p.method)}</td>
-                    <td className="px-5 py-3 text-xs" style={{ color: "var(--text-faint)" }}>{tx(p.date)}</td>
+                    <td className="px-5 py-3 text-xs" style={{ color: "var(--text-faint)" }}>{tx(dateLabel(p.createdAt || p.date))}</td>
                     <td className="px-5 py-3 text-sm" style={{ color: "var(--text-muted)" }}>{tx(p.note || "—")}</td>
                   </tr>
                 ))}
@@ -230,9 +294,8 @@ export default function DebtDetail({ debtorId, onBack }) {
           {tab === "activity" && (
             <div className="p-5 space-y-4">
               {[
-                { t: "Qarz yaratildi — " + formatCurrency(data.debt), time: data.lastPurchase + ", 16:40", icon: CreditCard, color: "var(--danger)" },
-                { t: "To'lov qabul qilindi — 60 000 so'm", time: "01 Sep 2026, 10:15", icon: CheckCircle, color: "var(--success)" },
-                { t: "Yangi xarid — " + formatCurrency(data.spent), time: data.lastPurchase + ", 14:22", icon: ShoppingCart, color: "var(--brand)" },
+                { t: "Joriy qarz — " + formatCurrency(data.currentDebt), time: data.dueDate, icon: CreditCard, color: "var(--danger)" },
+                ...activity,
               ].map((a, i) => (
                 <div key={i} className="flex items-start gap-3">
                   <div className="p-2 rounded-xl shrink-0" style={{ background: "var(--surface-2)" }}>
@@ -267,7 +330,7 @@ export default function DebtDetail({ debtorId, onBack }) {
               <div>
                 <label className="block text-xs font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>{tx("Summa")}</label>
                 <div className="relative">
-                  <input
+                  <input placeholder="0"
                     type="number"
                     step="any"
                     value={moneyInputValue(payAmount, false)}
@@ -344,7 +407,7 @@ export default function DebtDetail({ debtorId, onBack }) {
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>{tx("Qarz summasi (so'm)")}</label>
-                <input type="number" step="any" className="input-base" value={moneyInputValue(form.debt, false)} onChange={(e) => setForm({ ...form, debt: String(toBaseMoney(e.target.value)) })} />
+                <input placeholder="0" type="number" step="any" className="input-base" value={moneyInputValue(form.debt, false)} onChange={(e) => setForm({ ...form, debt: String(toBaseMoney(e.target.value)) })} />
               </div>
             </div>
             <div className="flex gap-3 mt-6">

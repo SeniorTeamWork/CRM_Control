@@ -18,14 +18,16 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer,
-  AreaChart,
+  ComposedChart,
   Area,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
 } from "recharts";
 import { readFinanceOperations } from "../data/financeStore";
+import { readOrders } from "../data/ordersStore";
 import { readDebtPayments, readPosSales, withDebtBalance } from "../data/debtPayments";
 import { formatCurrency } from "../data/currency";
 import { getData, useDataVersion } from "../supabase/db";
@@ -134,6 +136,8 @@ export default function Reports() {
     };
     sales.forEach((sale) => add(sale.createdAt || sale.date, "revenue", Number(sale.amount || 0)));
     returns.forEach((item) => add(item.date || item.createdAt, "revenue", -Number(item.amount || 0)));
+    readOrders().filter((order) => order.status === "reserved" && Number(order.advancePayment || 0) > 0)
+      .forEach((order) => add(order.advancePaymentDate || order.updatedAt || order.createdAt, "revenue", order.advancePayment));
     finance.incomes.forEach((item) => add(item.date, "revenue", item.amount));
     finance.expenses.forEach((item) => add(item.date, "expenses", item.amount));
     return Object.values(grouped).map((item) => ({ ...item, profit: item.revenue - item.expenses })).sort((a, b) => a.date.localeCompare(b.date));
@@ -150,6 +154,13 @@ export default function Reports() {
   const chartData = useMemo(() => {
     return filterDataByRange(monthlyData, dateRange);
   }, [monthlyData, dateRange]);
+  const chartMaxValue = Math.max(
+    0,
+    ...chartData.flatMap((item) => [
+      Number(item[currentReportObj.primaryKey] || 0),
+      Number(item[currentReportObj.secondaryKey] || 0),
+    ])
+  );
 
   // Dinamik xulosa (Summary) kartochkalari ma'lumotlari
   const summaryCards = useMemo(() => {
@@ -437,9 +448,9 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Recharts AreaChart (140.0 mln yozuvi to'liq pastroqqa tushirilgan) */}
+        {/* Kunlik va haftalik ko'rsatkichlar bir xil ustunli grafikda taqqoslanadi. */}
         <ResponsiveContainer width="100%" height={260}>
-          <AreaChart
+          <ComposedChart
             data={chartData}
             margin={{
               top: 25,
@@ -488,10 +499,8 @@ export default function Reports() {
               axisLine={false}
               tickLine={false}
             />
-            {/* 140.0 mln qiymatining yarmi to'silib qolmasligi uchun domain 160.0 mln ga ko'tarilgan */}
             <YAxis
-              domain={[0, 160000000]}
-              ticks={[0, 35000000, 70000000, 105000000, 140000000]}
+              domain={[0, chartMaxValue ? Math.ceil(chartMaxValue * 1.15) : 1]}
               tickFormatter={(v) => formatCurrency(v)}
               tick={{
                 fontSize: 11,
@@ -511,25 +520,46 @@ export default function Reports() {
                 fontSize: 12,
               }}
             />
-            <Area
-              type="monotone"
-              dataKey={currentReportObj.primaryKey}
-              name={tx(currentReportObj.primaryName)}
-              stroke={currentReportObj.color}
-              fill="url(#primColor)"
-              strokeWidth={2.5}
-              dot={false}
-            />
-            <Area
-              type="monotone"
-              dataKey={currentReportObj.secondaryKey}
-              name={tx(currentReportObj.secondaryName)}
-              stroke="var(--success)"
-              fill="url(#secColor)"
-              strokeWidth={2}
-              dot={false}
-            />
-          </AreaChart>
+            {dateRange === "today" || dateRange === "week" ? (
+              <>
+                <Bar
+                  dataKey={currentReportObj.primaryKey}
+                  name={tx(currentReportObj.primaryName)}
+                  fill={currentReportObj.color}
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={56}
+                />
+                <Bar
+                  dataKey={currentReportObj.secondaryKey}
+                  name={tx(currentReportObj.secondaryName)}
+                  fill="var(--success)"
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={56}
+                />
+              </>
+            ) : (
+              <>
+                <Area
+                  type="monotone"
+                  dataKey={currentReportObj.primaryKey}
+                  name={tx(currentReportObj.primaryName)}
+                  stroke={currentReportObj.color}
+                  fill="url(#primColor)"
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey={currentReportObj.secondaryKey}
+                  name={tx(currentReportObj.secondaryName)}
+                  stroke="var(--success)"
+                  fill="url(#secColor)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </>
+            )}
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
 

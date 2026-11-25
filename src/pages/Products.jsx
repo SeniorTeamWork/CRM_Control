@@ -19,7 +19,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-import { products as initialProducts, suppliers as supplierSeed } from "../data/mockData";
 import { useToast } from "../context/ToastContext";
 import { useLanguage } from "../context/LanguageContext";
 import { downloadCsv } from "../utils/csv";
@@ -39,8 +38,8 @@ export default function Products({ onNavigate }) {
   const [suppliers] = useState(() => {
     try {
       const saved = getSuppliers(null);
-      return Array.isArray(saved) ? saved : supplierSeed;
-    } catch { return supplierSeed; }
+      return Array.isArray(saved) ? saved : [];
+    } catch { return []; }
   });
 
   /* =====================================================
@@ -84,8 +83,8 @@ export default function Products({ onNavigate }) {
     useState(() => {
       try {
         const saved = getProducts(null);
-        return Array.isArray(saved) ? saved : initialProducts;
-      } catch { return initialProducts; }
+        return Array.isArray(saved) ? saved : [];
+      } catch { return []; }
     });
   const [reservedStock, setReservedStock] = useState(reservedQuantities);
   useEffect(() => {

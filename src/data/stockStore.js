@@ -1,12 +1,11 @@
-import { products as initialProducts } from "./mockData";
 import { getProducts } from "../supabase/bolimlar/mahsulotlar";
 
 export const readStockProducts = () => {
   try {
     const saved = getProducts(null);
-    return Array.isArray(saved) ? saved : initialProducts;
+    return Array.isArray(saved) ? saved : [];
   } catch {
-    return initialProducts;
+    return [];
   }
 };
 

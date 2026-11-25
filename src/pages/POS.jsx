@@ -3,6 +3,7 @@ import SalesProductFilter from "../components/SalesProductFilter";
 import { normalizeProductText, saleMatchesProduct } from "../data/salesProductFilter";
 import "./Sales.css";
 import { resolveReceivingCard } from "../data/directorCards";
+import ReceivingCardSelect from "../components/ReceivingCardSelect";
 import ReceiptPaymentDetails from "../components/ReceiptPaymentDetails";
 import ProductQuickAddModal from "../components/ProductQuickAddModal";
 import { useTenantCompanyName } from "../data/tenantBrand";
@@ -24,6 +25,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./POS.css";
 import "./POSTheme.css";
 import {
+  FiBookmark,
   FiSearch,
   FiShoppingCart,
   FiUser,
@@ -31,12 +33,14 @@ import {
   FiPrinter,
   FiX,
 } from "react-icons/fi";
-import { customers as initialCustomers, products as initialProducts, suppliers as supplierSeed } from "../data/mockData";
 import { useToast } from "../context/ToastContext";
 import checkAnimationSound from "../assets/check animation sound.m4a";
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { defectReservationKey, removeOrder, reservedQuantitiesByCondition as readReservedQuantitiesByCondition } from "../data/ordersStore";
+import { uniqueProductCount } from "../data/productCounts";
+import { defectReservationKey, readOrders, removeOrder, reservedQuantitiesByCondition as readReservedQuantitiesByCondition } from "../data/ordersStore";
+import { deleteSaleDraft } from "../data/savedSaleDrafts";
+import { saveDebtPayment } from "../data/debtPayments";
 import { getData, removeData, setData } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getSuppliers } from "../supabase/bolimlar/taminotchilar";
@@ -63,7 +67,7 @@ const defectSaleRows = (product) => {
     defectLotQuantity: Math.max(0, Number(defect.quantity) || 0),
     defectStatus: "Brak",
     defectReason: defect.reason || "",
-    defectPrice: Number(defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
+    defectPrice: Number(defect.salePrice ?? defect.sellingPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0),
   })).filter((row) => row.defectLotQuantity > 0);
   const recordedQuantity = defects.reduce((sum, defect) => sum + Math.max(0, Number(defect.quantity) || 0), 0);
   const unrecordedQuantity = Math.max(0, Number(product?.defectiveStock || 0) - recordedQuantity);
@@ -116,13 +120,15 @@ const readPosCustomerSuggestions = (activeCustomerKey, activeSalesKey, query, se
   const matches = [...unique.values()];
   return matches.sort((a, b) => a.name.localeCompare(b.name, "uz", { sensitivity: "base" })).slice(0, 8);
 };
-export default function POS({ cartWindowOpen = false, onCartWindowChange, draftKey = POS_DRAFT_KEY, onDraftChange, onBusyChange, onSaveSaleDraft, saveDraftActionRef, hideSaveDraftButton = false, draftOpenedAt, salesStorageKey = "crm_sales", customerStorageKey = "crm_customers", salesDocumentType = "sales", currentUser = null, orderMode = false, headingText, initialOrderDraft = null, reservationOrderId = null, onSaveOrder, saveOrderActionRef, onOrderSaveAvailabilityChange, onOrderSaleComplete, onSaleActionComplete, saleSection = "", saleSectionLabel = null, initialDefectItem = null, onDefectSaleStarted }) {
+export default function POS({ cartWindowOpen = false, onCartWindowChange, draftKey = POS_DRAFT_KEY, onDraftChange, onBusyChange, onSaveSaleDraft, onSaleComplete, saveDraftActionRef, hideSaveDraftButton = false, draftOpenedAt, sourceSaleDraftId = null, salesStorageKey = "crm_sales", customerStorageKey = "crm_customers", salesDocumentType = "sales", currentUser = null, orderMode = false, headingText, initialOrderDraft = null, reservationOrderId = null, onSaveOrder, saveOrderActionRef, onOrderSaveAvailabilityChange, onOrderSaleComplete, onSaleActionComplete, saleSection = "", saleSectionLabel = null, initialDefectItem = null, onDefectSaleStarted }) {
   useUILanguage();
   const companyName = useTenantCompanyName();
   const { t } = useLanguage();
   const { success, warning } = useToast();
   const draftData = initialOrderDraft || readPosDraft(draftKey);
   const [activeReservationOrderId, setActiveReservationOrderId] = useState(() => reservationOrderId || draftData.sourceOrderId || null);
+  const activeReservedOrder = activeReservationOrderId ? readOrders().find((order) => String(order.id) === String(activeReservationOrderId) && order.status === "reserved") || null : null;
+  const previouslyPaidAmount = Number(activeReservedOrder?.advancePayment || 0);
   const previousDefectModeRef = useRef(normalizeProductText(saleSection) === "brak");
 
   const text = (key, fallback) =>
@@ -136,7 +142,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const [productList, setProductList] = useState(() => {
     // Mahsulotlar Supabase'dagi "mahsulotlar" jadvalidan (bolimlar/mahsulotlar.js)
     const saved = getProducts(null);
-    return Array.isArray(saved) ? saved : initialProducts;
+    return Array.isArray(saved) ? saved : [];
   });
   const [reservedStock, setReservedStock] = useState(() => readReservedQuantitiesByCondition(activeReservationOrderId));
 
@@ -150,9 +156,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const [suppliers] = useState(() => {
     try {
       const saved = getSuppliers(null);
-      return Array.isArray(saved) ? saved : supplierSeed;
+      return Array.isArray(saved) ? saved : [];
     } catch {
-      return supplierSeed;
+      return [];
     }
   });
   const [selectedProductSelect] =
@@ -212,6 +218,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     if (!Array.isArray(saved)) return [];
     return isDefectSale ? saved.filter((item) => Boolean(item.isDefectSale && item.defectId)) : saved;
   });
+  const cartProductCount = uniqueProductCount(cart);
   const consumedDefectItemKeyRef = useRef(null);
   useEffect(() => {
     if (!initialDefectItem) {
@@ -270,6 +277,10 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [saveDraftOpen, setSaveDraftOpen] = useState(false);
+  const [reserveConfirmOpen, setReserveConfirmOpen] = useState(false);
+  const [advancePayment, setAdvancePayment] = useState(() => initialOrderDraft?.advancePayment ? String(initialOrderDraft.advancePayment) : "");
+  const [advancePaymentMethod, setAdvancePaymentMethod] = useState(() => initialOrderDraft?.advancePaymentMethod || "");
+  const [selectedAdvanceCardId, setSelectedAdvanceCardId] = useState(() => initialOrderDraft?.advanceReceivingCard?.id || "");
   useEffect(() => {
     if (compactCart) cartWindowBodyRef.current?.scrollTo({ top: 0 });
   }, [paymentOpen, compactCart]);
@@ -302,7 +313,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   },[cart, globalDiscount, customerName, customerPhone, deliveryAddress,
     addresses, deliveryDate, selectedAddressId, addressConfirmed, paymentComplete, draftKey, orderMode, activeReservationOrderId]);
 
-  useEffect(() => { onDraftChange?.({ customerName, customerPhone, count: cart.length }); }, [customerName, customerPhone, cart.length, onDraftChange]);
+  useEffect(() => { onDraftChange?.({ customerName, customerPhone, count: cartProductCount }); }, [customerName, customerPhone, cartProductCount, onDraftChange]);
 
 
   useEffect(() => {
@@ -345,7 +356,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const [receiptOpen, setReceiptOpen] =
     useState(false);
 
-  useEffect(() => { onBusyChange?.(paymentOpen || !!quickAddProduct || receiptOpen || saveDraftOpen); }, [paymentOpen, quickAddProduct, receiptOpen, saveDraftOpen, onBusyChange]);
+  useEffect(() => { onBusyChange?.(paymentOpen || !!quickAddProduct || receiptOpen || saveDraftOpen || reserveConfirmOpen); }, [paymentOpen, quickAddProduct, receiptOpen, saveDraftOpen, reserveConfirmOpen, onBusyChange]);
 
   const [receiptNumber, setReceiptNumber] =
     useState("");
@@ -609,7 +620,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setGlobalDiscount(0);
   };
 
-  const requestSaveOrder = () => {
+  // "Band qilish": avval tekshiriladi va tasdiqlash oynasi chiqadi; haqiqiy saqlash confirmed === true bo'lganda bajariladi.
+  const requestSaveOrder = (confirmed = false) => {
     if (!cart.length) { warning("Buyurtma bo‘sh", "Avval mahsulot tanlang."); return false; }
     if (!customerName.trim()) { setCustomerError("Mijoz ismini kiriting."); return false; }
     if (!/^\d{9}$/.test(phoneDigits(customerPhone))) { setCustomerError("Telefon raqamini 9 ta raqam bilan kiriting."); return false; }
@@ -618,7 +630,32 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     const reservations = readReservedQuantitiesByCondition(activeReservationOrderId);
     const insufficient = findInsufficientCartItem(cart, products, reservations);
     if (insufficient) { setProductList(products); warning("Tovar yetarli emas", `${insufficient.name || "Mahsulot"}: band qilinmagan qoldiqdan ko‘p miqdor kiritildi.`); return false; }
+    if (confirmed !== true) { setCustomerError(""); setReserveConfirmOpen(true); return true; }
+    const advancePaymentAmount = Math.min(Math.max(0, Math.round(total)), toBaseMoney(advancePayment));
+    if (advancePaymentAmount > 0 && !advancePaymentMethod) { warning("To‘lov usulini tanlang", "Oldindan to‘lov uchun naqd yoki kartani tanlang."); setReserveConfirmOpen(true); return false; }
+    let advanceReceivingCard = null;
+    if (advancePaymentAmount > 0 && advancePaymentMethod === "card") {
+      try {
+        const existingAdvance = Number(initialOrderDraft?.advancePayment || 0);
+        const savedSnapshot = initialOrderDraft?.advanceReceivingCard;
+        advanceReceivingCard = selectedAdvanceCardId
+          ? resolveReceivingCard(selectedAdvanceCardId)
+          : savedSnapshot && savedSnapshot.id === initialOrderDraft?.advanceReceivingCard?.id && advancePaymentAmount === existingAdvance
+            ? savedSnapshot
+            : resolveReceivingCard("");
+      } catch (cause) {
+        warning(cause.message || "Pul qabul qiluvchi kartani tanlang.", "Oldindan to‘lovni qabul qilish kartasini tanlang.");
+        setReserveConfirmOpen(true);
+        return false;
+      }
+    }
     const now = new Date().toISOString();
+    const reservedAdvancePayment = advancePaymentAmount;
+    const previousOrder = activeReservationOrderId ? readOrders().find((item) => String(item.id) === String(activeReservationOrderId)) : null;
+    const advanceUnchanged = previousOrder
+      && Number(previousOrder.advancePayment || 0) === reservedAdvancePayment
+      && (previousOrder.advancePaymentMethod || null) === (reservedAdvancePayment > 0 ? advancePaymentMethod : null)
+      && (previousOrder.advanceReceivingCard?.number || "") === (advanceReceivingCard?.number || "");
     const saved = onSaveOrder?.({
       id: activeReservationOrderId || crypto.randomUUID(),
       orderNumber: initialOrderDraft?.orderNumber || ("B-" + Date.now().toString().slice(-6)),
@@ -630,6 +667,10 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       subtotal,
       discountAmount: discountAmt,
       total: Math.round(total),
+      advancePayment: reservedAdvancePayment,
+      advancePaymentMethod: reservedAdvancePayment > 0 ? advancePaymentMethod : null,
+      advanceReceivingCard: reservedAdvancePayment > 0 ? advanceReceivingCard : null,
+      advancePaymentDate: reservedAdvancePayment > 0 ? (advanceUnchanged ? previousOrder.advancePaymentDate || previousOrder.updatedAt || now : now) : null,
       deliveryAddress,
       deliveryDate,
       addresses,
@@ -643,6 +684,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       createdAt: initialOrderDraft?.createdAt || now,
     });
     if (!saved) { warning("Buyurtma saqlanmadi", "Ma’lumotni saqlash imkoni bo‘lmadi. Qayta urinib ko‘ring."); return false; }
+    if (sourceSaleDraftId) deleteSaleDraft(sourceSaleDraftId);
     setCart([]);
     setCustomerName("");
     setCustomerPhone("");
@@ -654,6 +696,9 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setAddressConfirmed(false);
     setAddressError("");
     setGlobalDiscount(0);
+    setAdvancePayment("");
+    setAdvancePaymentMethod("");
+    setSelectedAdvanceCardId("");
     success("Buyurtma vaqtincha saqlandi", "Mahsulotlar buyurtma uchun band qilindi.");
     onSaleActionComplete?.("Band qilingan");
     return true;
@@ -672,7 +717,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
   const confirmSaveSaleDraft = () => {
     const saved = onSaveSaleDraft?.({
-      id: crypto.randomUUID(),
+      id: sourceSaleDraftId || crypto.randomUUID(),
       cart,
       customerName: customerName.trim(),
       customerPhone,
@@ -968,7 +1013,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
     setCustomerError("");
     setAddressError("");
-    setPaymentAmount(orderMode ? String(Math.round(total)) : "");
+    setPaymentAmount(activeReservedOrder ? "" : orderMode ? String(Math.round(total)) : "");
     setPaymentMethod("cash");
     setSelectedCardId("");
     setDebtDueDate(getDefaultDebtDueDate());
@@ -994,10 +1039,15 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     const insufficient = findInsufficientCartItem(cart, currentProducts, currentReservations);
     if (insufficient) { setProductList(currentProducts); setPaymentError(`${insufficient.name}: band qilinmagan mahsulot yetarli emas. Miqdorni kamaytiring.`); return; }
     const saleTotal = Math.round(total);
+    const reservedOrder = activeReservationOrderId
+      ? readOrders().find((order) => String(order.id) === String(activeReservationOrderId) && order.status === "reserved") || null
+      : null;
+    const priorAdvanceAmount = Math.min(saleTotal, Math.max(0, Number(reservedOrder?.advancePayment || 0)));
     const amount = paymentAmount === ""
       ? 0
-      : Math.min(saleTotal, Math.max(0, Number(paymentAmount) || 0));
-    if (amount < saleTotal && !debtDueDate) {
+      : Math.min(Math.max(0, saleTotal - priorAdvanceAmount), Math.max(0, Number(paymentAmount) || 0));
+    const totalPaid = Math.min(saleTotal, priorAdvanceAmount + amount);
+    if (totalPaid < saleTotal && !debtDueDate) {
       setPaymentError("Qolgan qarzni qaytarish muddatini tanlang.");
       return;
     }
@@ -1011,7 +1061,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       }
     }
     paymentSubmittingRef.current = true;
-    const remainingDebt = Math.max(0, saleTotal - amount);
+    const remainingDebt = Math.max(0, saleTotal - totalPaid);
     const trimmedName = capitalizeCustomerName(customerName.trim());
     const trimmedPhone = customerPhone.trim();
     const typedAddress = deliveryAddress.trim();
@@ -1037,7 +1087,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       ? savedCustomers
       : customerStorageKey === "crm_additional_pos_customers"
         ? []
-        : initialCustomers.map((customer) => ({ ...customer }));
+        : [];
     const existingIndex =
       customersList.findIndex(
         (c) =>
@@ -1141,15 +1191,15 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       isDefectSale,
       hasDefectItems: cart.some((item) => item.isDefectSale),
       customer: trimmedName,
-      products: cart.length,
-      productIds: cart.map((item) => item.id),
+      products: cartProductCount,
+      productIds: [...new Set(cart.map((item) => item.id))],
       amount: saleTotal,
-      paidAmount: amount,
+      paidAmount: totalPaid,
       initialPaidAmount: amount,
       debtBalance: remainingDebt,
       debtDueDate: remainingDebt > 0 ? debtDueDate : "",
-      status: amount === 0 ? "debt" : remainingDebt > 0 ? "partial" : "paid",
-      payment: amount === 0 ? "Qarz" : paymentMethod === "card" ? "Karta" : "Naqd",
+      status: totalPaid === 0 ? "debt" : remainingDebt > 0 ? "partial" : "paid",
+      payment: amount > 0 ? paymentMethod === "card" ? "Karta" : "Naqd" : priorAdvanceAmount > 0 ? reservedOrder?.advancePaymentMethod === "card" ? "Karta" : "Naqd" : "Qarz",
       receivingCard,
       cardLast4: receivingCard?.number.slice(-4) || "",
 
@@ -1162,7 +1212,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       deliveryAddress: primaryAddress,
       deliveryAddresses: checkoutAddresses.map((address) => ({
         ...address,
-        productCount: cart.filter((item) => item.addressId === address.id).length,
+        productCount: uniqueProductCount(cart.filter((item) => item.addressId === address.id)),
       })),
 
       items: cart.map((item) => {
@@ -1194,7 +1244,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
       total: saleTotal,
 
-      paymentMethod: amount === 0 ? "Qarz" : paymentMethod === "card" ? "Karta" : "Naqd",
+      paymentMethod: amount > 0 ? paymentMethod === "card" ? "Karta" : "Naqd" : priorAdvanceAmount > 0 ? reservedOrder?.advancePaymentMethod === "card" ? "Karta" : "Naqd" : "Qarz",
 
       date:
         now.toISOString(),
@@ -1212,6 +1262,20 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     salesList.unshift(sale);
 
     setData(salesStorageKey, salesList);
+    if (priorAdvanceAmount > 0 && reservedOrder) {
+      saveDebtPayment({
+        id: `RES-${reservedOrder.id}-${sale.id}`,
+        saleId: sale.id,
+        sourceOrderId: reservedOrder.id,
+        customer: trimmedName,
+        customerName: trimmedName,
+        amount: priorAdvanceAmount,
+        method: reservedOrder.advancePaymentMethod === "card" ? "Karta" : "Naqd",
+        receivingCard: reservedOrder.advanceReceivingCard || null,
+        cardLast4: reservedOrder.advanceReceivingCard?.number?.slice(-4) || "",
+        createdAt: reservedOrder.advancePaymentDate || reservedOrder.updatedAt || now.toISOString(),
+      });
+    }
 
     /* =================================================
        UPDATE PRODUCTS STOCK
@@ -1258,7 +1322,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
        SHOW SUCCESS
     ================================================= */
 
-    setPaidAmount(amount);
+    setPaidAmount(totalPaid);
     setPaymentComplete(true);
     setShowPaymentAnimation(true);
     if (paymentSoundRef.current) {
@@ -1278,6 +1342,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   ===================================================== */
 
   const handleNewSale = () => {
+    const closeFinishedSaleTab = !orderMode && Boolean(completedSale);
     setActiveReservationOrderId(null);
     setCompletedSale(null);
     clearTimeout(paymentTimerRef.current);
@@ -1316,6 +1381,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     setPaymentError("");
     setPaidAmount(0);
     if (orderMode) onOrderSaleComplete?.();
+    else if (closeFinishedSaleTab) onSaleComplete?.();
   };
 
   /* =====================================================
@@ -1373,6 +1439,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     customerError,
     paymentOpen,
     paymentAmount,
+    previouslyPaidAmount,
     setPaymentAmount,
     paymentMethod,
     setPaymentMethod,
@@ -1573,7 +1640,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
         inert={compactCart && cartWindowOpen}
       >
         <FiShoppingCart size={22} />
-        <span>{tx("Savatcha ")}<small>({tx(cart.length)})</small></span>
+        <span>{tx("Savatcha ")}<small>({tx(cartProductCount)})</small></span>
         <strong>{formatCurrency(total)}</strong>
       </button>
 
@@ -2039,12 +2106,35 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
         document.getElementById("main-modal-root") || document.body
       )}
 
+      <Modal contentOnly open={reserveConfirmOpen} onClose={() => setReserveConfirmOpen(false)} title="Band qilishni tasdiqlang" subtitle="Mahsulotlar buyurtma uchun band qilinadi" icon={FiBookmark} width={480}>
+        <div className="pos-save-draft-summary">
+          <div><span>{tx("Mijoz")}</span><strong>{customerName.trim() || "Ism kiritilmagan"}</strong></div>
+          <div><span>{tx("Telefon")}</span><strong>{customerPhone ? `+998 ${formatUzPhone(customerPhone)}` : "Kiritilmagan"}</strong></div>
+          <div><span>{tx("Savdo ochilgan vaqt")}</span><strong>{new Intl.DateTimeFormat("uz-UZ", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tashkent" }).format(new Date(draftOpenedAt || Date.now()))}</strong></div>
+          <div><span>{tx("Mahsulotlar")}</span><strong>{cartProductCount}{tx("xil ·")}{cart.reduce((sum, item) => sum + Number(item.qty || 0), 0)}{tx("dona")}</strong></div>
+          <div className="pos-save-draft-total"><span>{tx("Jami")}</span><strong>{formatCurrency(total)}</strong></div>
+          <label className="pos-reservation-advance"><span>{tx("Oldindan to‘lov summasi")} · {tx("ixtiyoriy")}</span><div><input className="input-base" type="text" inputMode="numeric" value={advancePayment === "" ? "" : moneyInputValue(advancePayment, true)} onChange={(event) => { const digits = event.target.value.replace(/\D/g, ""); const amount = digits ? toBaseMoney(digits) : ""; setAdvancePayment(amount === "" ? "" : String(Math.min(Math.round(total), amount))); }} placeholder="0" /><em>{tx("so‘m")}</em></div></label>
+          {toBaseMoney(advancePayment) > 0 && <>
+            <div className="pos-reservation-payment-preview"><span>{tx("Qabul qilinadigan oldindan to‘lov")}</span><strong>{formatCurrency(Math.min(Math.round(total), toBaseMoney(advancePayment)))}</strong></div>
+            <fieldset className="pos-reservation-method"><legend>{tx("To‘lov usuli")}</legend><div>
+              <button type="button" className={advancePaymentMethod === "cash" ? "is-active" : ""} aria-pressed={advancePaymentMethod === "cash"} onClick={() => setAdvancePaymentMethod("cash")}>{tx("Naqd")}</button>
+              <button type="button" className={advancePaymentMethod === "card" ? "is-active" : ""} aria-pressed={advancePaymentMethod === "card"} onClick={() => setAdvancePaymentMethod("card")}>{tx("Karta")}</button>
+            </div></fieldset>
+            {advancePaymentMethod === "card" && <ReceivingCardSelect value={selectedAdvanceCardId} onChange={setSelectedAdvanceCardId} />}
+          </>}
+        </div>
+        <div className="pos-save-draft-actions">
+          <button type="button" onClick={() => setReserveConfirmOpen(false)}>{tx("Bekor qilish")}</button>
+          <button type="button" onClick={() => { setReserveConfirmOpen(false); requestSaveOrder(true); }}>{tx("Band qilishni tasdiqlash")}</button>
+        </div>
+      </Modal>
+
       <Modal contentOnly open={saveDraftOpen} onClose={() => setSaveDraftOpen(false)} title="Sotuvni saqlashni tasdiqlang" subtitle="Savat keyin davom ettirish uchun Qoralamaga saqlanadi" icon={FiShoppingCart} width={480}>
         <div className="pos-save-draft-summary">
           <div><span>{tx("Mijoz")}</span><strong>{customerName.trim() || "Ism kiritilmagan"}</strong></div>
           <div><span>{tx("Telefon")}</span><strong>{customerPhone ? `+998 ${formatUzPhone(customerPhone)}` : "Kiritilmagan"}</strong></div>
           <div><span>{tx("Savdo ochilgan vaqt")}</span><strong>{new Intl.DateTimeFormat("uz-UZ", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tashkent" }).format(new Date(draftOpenedAt || Date.now()))}</strong></div>
-          <div><span>{tx("Mahsulotlar")}</span><strong>{cart.length}{tx("xil ·")}{cart.reduce((sum, item) => sum + Number(item.qty || 0), 0)}{tx("dona")}</strong></div>
+          <div><span>{tx("Mahsulotlar")}</span><strong>{cartProductCount}{tx("xil ·")}{cart.reduce((sum, item) => sum + Number(item.qty || 0), 0)}{tx("dona")}</strong></div>
           <div className="pos-save-draft-total"><span>{tx("Jami")}</span><strong>{formatCurrency(total)}</strong></div>
         </div>
         <div className="pos-save-draft-actions">

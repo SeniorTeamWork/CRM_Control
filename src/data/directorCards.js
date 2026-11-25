@@ -42,10 +42,16 @@ export function resolveReceivingCard(id) {
   return { id: card.id, label: card.label, holder: card.holder, number: card.number };
 }
 
-export function recordedCardTotal(card, sales, payments) {
-  return [...sales, ...payments].reduce((total, record) => {
+export function recordedCardTotal(card, sales, payments, orders = []) {
+  const pastPayments = [...sales, ...payments].reduce((total, record) => {
     if (!record.receivingCard || record.receivingCard.number !== card.number) return total;
     const amount = Number(record.saleId ? record.amount : record.initialPaidAmount ?? record.paidAmount ?? 0);
     return total + (Number.isFinite(amount) ? Math.max(0, amount) : 0);
   }, 0);
+  const reservedAdvances = orders.reduce((total, order) => {
+    if (order.status !== "reserved" || order.advanceReceivingCard?.number !== card.number) return total;
+    const amount = Number(order.advancePayment || 0);
+    return total + (Number.isFinite(amount) ? Math.max(0, amount) : 0);
+  }, 0);
+  return pastPayments + reservedAdvances;
 }

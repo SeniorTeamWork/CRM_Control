@@ -34,6 +34,7 @@ import {
 import { expenseCategories as initialCategories } from "../data/mockData";
 import { readFinanceOperations, saveFinanceOperations } from "../data/financeStore";
 import { readDebtPayments, readPosSales, withDebtBalance } from "../data/debtPayments";
+import { readOrders } from "../data/ordersStore";
 import { downloadCsv } from "../utils/csv";
 
 import { formatCurrency, moneyInputValue, toBaseMoney, toDisplayMoney, currencyLabel } from "../data/currency";
@@ -156,6 +157,18 @@ export default function Finance() {
 
   const payments = readDebtPayments(), supplierOrders = readSupplierOrders(), suppliers = readBusinessList("crm_suppliers");
   const sales = readPosSales().map((sale) => withDebtBalance(sale, payments));
+  const reservedAdvanceIncomes = readOrders().filter((order) => order.status === "reserved" && Number(order.advancePayment || 0) > 0).map((order) => ({
+    id: `reservation-advance-${order.id}`,
+    category: "Oldindan to‘lov",
+    amount: Number(order.advancePayment || 0),
+    date: isoDate(order.advancePaymentDate || order.updatedAt || order.createdAt),
+    employee: "Tizim",
+    description: `${order.customerName || tx("Mijoz")} — band qilingan buyurtma uchun oldindan to‘lov`,
+    paymentMethod: order.advancePaymentMethod || "cash",
+    receivingCard: order.advanceReceivingCard || null,
+    automatic: true,
+    type: "income",
+  }));
   const approvedReturns = readBusinessList("crm_returns").filter((item) => item.status === "approved");
   const returnAmountBySale = approvedReturns.reduce((totals, item) => {
     const id = String(item.saleId || "");
@@ -174,12 +187,26 @@ export default function Finance() {
     const supplier = suppliers.find((item) => String(item.id) === String(order.supplierId));
     return { id: `purchase-${order.supplierId}-${order.id}`, category: "Mahsulot xaridi", amount: paid, date: isoDate(order.date), employee: "Tizim", description: `${supplier?.name || "Ta'minotchi"} — mahsulot xaridi`, automatic: true, type: "expense" };
   }).filter((item) => item.amount > 0);
-  const supplierRefunds = supplierReturns.filter(r => r.version === 2 && Number(r.refundedAmount) > 0).map(r => ({ id: `supplier-refund-${r.id}`, category: "Ta’minotchidan qaytgan pul", amount: Number(r.refundedAmount), date: isoDate(r.returnedAt), employee: "Tizim", description: `${r.supplierName} — ${r.productName} · ${tx("Qaytarildi")}`, automatic: true, type: "income" }));
+  const supplierRefunds = supplierReturns.filter((record) => record.version === 2).flatMap((record) => {
+    const payments = Array.isArray(record.refundPayments) && record.refundPayments.length
+      ? record.refundPayments
+      : Number(record.refundedAmount) > 0 ? [{ id: "total", amount: record.refundedAmount, date: record.returnedAt }] : [];
+    return payments.filter((payment) => Number(payment.amount) > 0).map((payment, index) => ({
+      id: `supplier-refund-${record.id}-${payment.id || index}`,
+      category: "Ta’minotchidan qaytgan pul",
+      amount: Number(payment.amount),
+      date: isoDate(payment.date || record.returnedAt),
+      employee: "Tizim",
+      description: `${record.supplierName} — ${record.productName} · ${tx("Qaytarildi")}`,
+      automatic: true,
+      type: "income",
+    }));
+  });
   const customerReturnAdjustments = approvedReturns.filter((item) => Number(item.amount || 0) > 0).map((item) => ({
     id: `customer-return-${item.id}`, category: "Mijoz qaytargan tovar", amount: -Number(item.amount || 0),
     date: isoDate(item.date || item.createdAt), employee: "Tizim", description: `${item.customer || tx("Mijoz")} — ${item.product || tx("Mahsulot")} · ${tx("Qaytarildi")}`, automatic: true, type: "income",
   }));
-  const allIncomes = [...supplierRefunds, ...automaticIncomes, ...customerReturnAdjustments, ...incomes.map((item, index) => ({ ...item, id: `income-${index}`, type: "income" }))];
+  const allIncomes = [...supplierRefunds, ...automaticIncomes, ...reservedAdvanceIncomes, ...customerReturnAdjustments, ...incomes.map((item, index) => ({ ...item, id: `income-${index}`, type: "income" }))];
   const allExpenses = [...automaticExpenses, ...expenses.map((item, index) => ({ ...item, id: `expense-${index}`, type: "expense" }))];
   const totalIncomeValue = allIncomes.reduce((total, item) => total + Number(item.amount || 0), 0);
   const totalExpenseValue = allExpenses.reduce((total, item) => total + Number(item.amount || 0), 0);

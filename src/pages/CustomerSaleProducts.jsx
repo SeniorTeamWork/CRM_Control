@@ -1,13 +1,28 @@
 import { translateText as tx } from "../locales/translateText";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
-import { MapPin, CheckCircle, RotateCcw } from "lucide-react";
-import { products as catalogProducts } from "../data/mockData";
+import { CheckCircle, RotateCcw } from "lucide-react";
+import { useProducts } from "../supabase/bolimlar/mahsulotlar";
 import { formatCurrency } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
 import { returnKeyFor, returnedQuantityFor } from './customerDetailHelpers';
+
+const isDefectiveLine = (item) => Boolean(
+  item.isDefectSale ||
+  item.isDefective ||
+  item.defectId ||
+  ["defective", "defect", "brak", "yaroqsiz"].includes(String(item.condition || "").trim().toLowerCase())
+);
+
+export const uniqueSaleProductCount = (sale) => {
+  const items = Array.isArray(sale?.items) && sale.items.length
+    ? sale.items
+    : (sale?.productIds || []).map((id) => ({ id }));
+  return uniqueProductCount(items, sale?.products);
+};
 
 export function SaleProductList({ sale, returnRecords = [], onReturn = () => {} }) {
   useUILanguage();
-  const count = Number(sale.products) || 0;
+  const catalogProducts = useProducts();
   const items = sale.items?.length
     ? sale.items.map((item) => ({
         ...item,
@@ -15,8 +30,7 @@ export function SaleProductList({ sale, returnRecords = [], onReturn = () => {} 
         deliveryAddress: item.deliveryAddress || sale.deliveryAddress || "Manzil biriktirilmagan",
       }))
     : (sale.productIds || [])
-      .slice(0, count)
-      .map((id) => catalogProducts.find((product) => product.id === id))
+      .map((id) => catalogProducts.find((product) => String(product.id) === String(id)))
       .filter(Boolean)
       .map((product) => ({
         id: product.id,
@@ -26,63 +40,104 @@ export function SaleProductList({ sale, returnRecords = [], onReturn = () => {} 
         quantityUnknown: true,
         deliveryAddress: sale.deliveryAddress || "Manzil biriktirilmagan",
       }));
-  const missing = Math.max(0, count - items.length);
+  const saleReturns = returnRecords.filter((record) => record.status === "approved" && String(record.saleId) === String(sale.id));
   const grossItemsTotal = items.reduce((sum, item) => {
     const quantity = Number(item.qty ?? item.quantity ?? 0);
-    const lineTotal = item.total != null ? Number(item.total) : Number(item.price || 0) * quantity;
-    return sum + lineTotal;
+    return sum + (item.total != null ? Number(item.total) : Number(item.price || 0) * quantity);
   }, 0);
-  const saleReturns = returnRecords.filter((record) => record.status === "approved" && String(record.saleId) === String(sale.id));
-  const returnedAmount = saleReturns.reduce((sum, record) => sum + Number(record.amount || 0), 0);
-  const originalSaleAmount = Number(sale.amount ?? sale.total ?? grossItemsTotal) + returnedAmount;
-  const salePriceFactor = grossItemsTotal > 0 ? originalSaleAmount / grossItemsTotal : 1;
+  const returnedSaleAmount = saleReturns.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const salePriceFactor = grossItemsTotal > 0 ? (Number(sale.amount ?? sale.total ?? grossItemsTotal) + returnedSaleAmount) / grossItemsTotal : 1;
+
+  const lineItems = items.map((item, index) => {
+    const returnKey = returnKeyFor(sale.id, item.id, index);
+    const quantity = Number(item.qty ?? item.quantity ?? 1);
+    const sameProductRows = items.filter((saleItem) => String(saleItem.id ?? "") === String(item.id ?? "")).length;
+    const lineReturns = saleReturns.filter((record) => record.returnKey === returnKey || (!record.returnKey && sameProductRows === 1 && String(record.productId ?? "") === String(item.id ?? "")));
+    const returnedFromHistory = lineReturns.reduce((sum, record) => sum + Number(record.quantity || 0), 0);
+    const returnedQuantity = Math.min(quantity, Math.max(returnedQuantityFor(returnRecords, returnKey, quantity, item), returnedFromHistory));
+    const recordedReturnedAmount = lineReturns.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+    const baseLineTotal = item.total != null ? Number(item.total) : Number(item.price || 0) * quantity;
+    const unitPrice = Math.round(Number(item.price ?? (baseLineTotal / Math.max(1, quantity))) * salePriceFactor);
+    const lineTotal = Math.round(baseLineTotal * salePriceFactor);
+    const returnedAmount = recordedReturnedAmount || returnedQuantity * unitPrice;
+    return {
+      item,
+      index,
+      returnKey,
+      quantity,
+      unitPrice,
+      lineTotal,
+      returnedQuantity,
+      returnedAmount,
+      remainingQuantity: Math.max(0, quantity - returnedQuantity),
+      isDefective: isDefectiveLine(item),
+      isReturned: returnedQuantity >= quantity,
+      lineReturns,
+    };
+  });
+
+  const groups = lineItems.reduce((result, line) => {
+    const identity = line.item.id != null && line.item.id !== ""
+      ? `id:${String(line.item.id).trim().toLocaleLowerCase()}`
+      : `name:${String(line.item.name).trim().toLocaleLowerCase()}`;
+    let group = result.find((entry) => entry.identity === identity);
+    if (!group) {
+      group = { identity, name: line.item.name, lines: [] };
+      result.push(group);
+    }
+    group.lines.push(line);
+    return result;
+  }, []);
+  const count = groups.length || uniqueSaleProductCount(sale);
+  const missing = Math.max(0, uniqueSaleProductCount(sale) - uniqueProductCount(lineItems));
 
   return (
     <div className="customer-sale-products">
       <strong>{tx(count)}{tx(" xil mahsulot")}</strong>
-      {items.length > 0 && (
+      {groups.length > 0 && (
         <div className="customer-sale-product-list">
-          {items.map((item, index) => {
-            const returnKey = returnKeyFor(sale.id, item.id, index);
-            const quantity = Number(item.qty ?? item.quantity ?? 1);
-            const sameProductRows = items.filter((saleItem) => String(saleItem.id ?? "") === String(item.id ?? "")).length;
-            const lineReturns = saleReturns.filter((record) => record.returnKey === returnKey || (!record.returnKey && sameProductRows === 1 && String(record.productId ?? "") === String(item.id ?? "")));
-            const returnedFromHistory = lineReturns.reduce((sum, record) => sum + Number(record.quantity || 0), 0);
-            const returnedQuantity = Math.min(quantity, Math.max(Number(item.returnedQuantity || 0), item.returned ? quantity : returnedQuantityFor(returnRecords, returnKey, quantity), returnedFromHistory));
-            const recordedReturnedAmount = lineReturns.reduce((sum, record) => sum + Number(record.amount || 0), 0);
-            const returnedAmount = recordedReturnedAmount || returnedQuantity * Number(item.price ?? (Number(item.total || 0) / Math.max(1, quantity))) * salePriceFactor;
-            const baseLineTotal = item.total != null ? Number(item.total) : Number(item.price || 0) * quantity;
-            const unitPrice = Math.round(Number(item.price ?? (baseLineTotal / Math.max(1, quantity))) * salePriceFactor);
-            const lineTotal = Math.round(baseLineTotal * salePriceFactor);
-            const netLineTotal = Math.max(0, lineTotal - returnedAmount);
-            const isReturned = returnedQuantity >= quantity;
+          {groups.map((group) => {
+            const goodLines = group.lines.filter((line) => !line.isDefective);
+            const defectiveLines = group.lines.filter((line) => line.isDefective);
+            const goodQuantity = goodLines.reduce((sum, line) => sum + line.quantity, 0);
+            const defectiveQuantity = defectiveLines.reduce((sum, line) => sum + line.quantity, 0);
+            const goodTotal = goodLines.reduce((sum, line) => sum + line.lineTotal, 0);
+            const defectiveTotal = defectiveLines.reduce((sum, line) => sum + line.lineTotal, 0);
+            const total = goodTotal + defectiveTotal;
+            const returnedAmount = group.lines.reduce((sum, line) => sum + line.returnedAmount, 0);
+            const goodReturnLine = goodLines.find((line) => line.remainingQuantity > 0);
+            const defectiveReturnLine = defectiveLines.find((line) => line.remainingQuantity > 0);
+            const metaLine = group.lines.find(({ item }) => item.id || item.brand || item.category);
+            const meta = metaLine?.item;
+            const priceBreakdown = (lines) => lines.map((line) => `${formatCurrency(line.unitPrice)} × ${line.quantity.toLocaleString("uz-UZ")}`).join(" · ");
             return (
-              <div className="customer-sale-product-item" key={returnKey}>
+              <div className="customer-sale-product-item customer-sale-product-group" key={group.identity}>
                 <div className="customer-sale-product-info">
-                  <div className="customer-sale-product-title"><strong>{item.name}</strong>{(item.isDefectSale || item.defectId) && <em>{tx("Brak mahsulot")}</em>}</div>
-                  <span className="customer-sale-product-quantity" style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    {item.quantityUnknown ? tx("Miqdor kiritilmagan") : <>{tx("Sotib olingan")}: {quantity.toLocaleString("uz-UZ")} {tx("dona")}</>}
-                  </span>
-                  <div className="customer-sale-product-financial">
-                    <span><small>{tx("Bir dona narxi")}</small><b>{formatCurrency(unitPrice)}</b></span>
-                    <span><small>{tx("Sotuv summasi")}</small><b>{formatCurrency(lineTotal)}</b></span>
-                    {returnedQuantity > 0 && <span className="is-returned"><small>{tx("Qaytarilgan")}: {returnedQuantity.toLocaleString("uz-UZ")} {tx("dona")}</small><b>− {formatCurrency(returnedAmount)}</b></span>}
-                    <span className="is-net"><small>{tx("Qolgan summa")}</small><b>{formatCurrency(netLineTotal)}</b></span>
+                  <div className="customer-sale-product-title"><strong>{group.name}</strong></div>
+                  {(meta?.id || meta?.brand || meta?.category) && (
+                    <small className="customer-sale-product-meta">
+                      {[meta.id && `${tx("ID")}: ${meta.id}`, meta.brand && `${tx("Brend")}: ${tx(meta.brand)}`, meta.category && `${tx("Kategoriya")}: ${tx(meta.category)}`].filter(Boolean).join(" · ")}
+                    </small>
+                  )}
+                  <div className="customer-sale-condition-list">
+                    {goodQuantity > 0 && <div className="customer-sale-condition is-good">
+                      <div><b>{tx("Yaroqli")}: {goodQuantity.toLocaleString("uz-UZ")} {tx("dona")}</b><small>{priceBreakdown(goodLines)}</small></div>
+                      <strong>{formatCurrency(goodTotal)}</strong>
+                      <div className="customer-sale-condition-actions"><button type="button" className={`customer-product-return customer-product-return-compact ${goodReturnLine ? "" : "is-requested"}`} onClick={() => goodReturnLine && onReturn(sale, goodReturnLine.item, goodReturnLine.index)} disabled={!goodReturnLine}>
+                        {goodReturnLine ? <RotateCcw size={13} /> : <CheckCircle size={13} />}{tx(goodReturnLine ? "Tovarni qaytarish" : "Qaytarilgan")}
+                      </button></div>
+                    </div>}
+                    {defectiveQuantity > 0 && <div className="customer-sale-condition is-defective">
+                      <div><b>{tx("Brak")}: {defectiveQuantity.toLocaleString("uz-UZ")} {tx("dona")}</b><small>{priceBreakdown(defectiveLines)}</small></div>
+                      <strong>{formatCurrency(defectiveTotal)}</strong>
+                      <div className="customer-sale-condition-actions"><button type="button" className={`customer-product-return customer-product-return-compact ${defectiveReturnLine ? "" : "is-requested"}`} onClick={() => defectiveReturnLine && onReturn(sale, defectiveReturnLine.item, defectiveReturnLine.index)} disabled={!defectiveReturnLine}>
+                        {defectiveReturnLine ? <RotateCcw size={13} /> : <CheckCircle size={13} />}{tx(defectiveReturnLine ? "Tovarni qaytarish" : "Qaytarilgan")}
+                      </button></div>
+                    </div>}
                   </div>
-                  {returnedQuantity > 0 && (lineReturns.length > 0 && lineReturns.every((record) => record.goodQuantity != null && record.defectiveQuantity != null)
-                    ? <span className="customer-sale-product-return-detail">{tx("Qaytarish tarkibi")}: {tx("Yaroqli")} {lineReturns.reduce((sum, record) => sum + Number(record.goodQuantity || 0), 0).toLocaleString("uz-UZ")} {tx("dona")} · {tx("Brak")}: {lineReturns.reduce((sum, record) => sum + Number(record.defectiveQuantity || 0), 0).toLocaleString("uz-UZ")} {tx("dona")}</span>
-                    : <span className="customer-sale-product-return-detail">{tx("Eski qaytarish yozuvida yaroqli va brak sonlari alohida saqlanmagan.")}</span>)}
-                  <span className="customer-sale-product-address"><MapPin size={14} /> {tx(item.deliveryAddress)}</span>
+                  <div className="customer-sale-product-total"><span>{tx("Umumiy summa")}</span><b>{formatCurrency(total)}</b></div>
+                  {returnedAmount > 0 && <span className="customer-sale-product-return-detail">{tx("Qaytarilgan summa")}: − {formatCurrency(returnedAmount)} · {tx("Qaytarilgan miqdor")}: {group.lines.reduce((sum, line) => sum + line.returnedQuantity, 0).toLocaleString("uz-UZ")} {tx("dona")}</span>}
                 </div>
-                <button
-                  type="button"
-                  className={`customer-product-return ${isReturned ? "is-requested" : ""}`}
-                  onClick={() => onReturn(sale, item, index)}
-                  disabled={isReturned}
-                >
-                  {isReturned ? <CheckCircle size={14} /> : <RotateCcw size={14} />}
-                  {tx(isReturned ? "Qaytarilgan" : "Tovarni qaytarish")}
-                </button>
               </div>
             );
           })}

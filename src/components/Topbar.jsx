@@ -1,7 +1,7 @@
 import { translateText as tx } from "../locales/translateText";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import './Topbar.css';
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import {
   Search,
   Plus,
@@ -19,12 +19,13 @@ import {
   RotateCcw,
   PackageX,
   UserRound,
+  Trash2,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useLanguage, languages } from "../context/LanguageContext";
 import { profileInitials, profileName } from "../data/profileStore";
 import { createPortal } from "react-dom";
-import { getCurrencySettings, saveCurrencySettings } from "../data/currency";
+import { getCentralBankRateMeta, getCurrencyRateMode, getCurrencySettings, refreshCentralBankUsdRate, saveCurrencySettings, saveManualUsdRate, setCurrencyRateMode } from "../data/currency";
 
 import { formatCurrency } from "../data/currency";
 import { getProducts } from "../supabase/bolimlar/mahsulotlar";
@@ -59,11 +60,24 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [currency, setCurrency] = useState(getCurrencySettings);
-  const [rateDraft, setRateDraft] = useState(() => String(getCurrencySettings().usdRate || ""));
   const [rateModal, setRateModal] = useState(false);
+  const [rateMode, setRateMode] = useState(getCurrencyRateMode);
+  const [rateDraft, setRateDraft] = useState(() => String(getCurrencySettings().usdRate || ""));
+  const [rateMeta, setRateMeta] = useState(getCentralBankRateMeta);
+  const [rateLoading, setRateLoading] = useState(false);
+  const [rateError, setRateError] = useState("");
+  const rateFetchInFlight = useRef(false);
   const [saleSectionsOpen, setSaleSectionsOpen] = useState(false);
 
-  const [customSections, setCustomSections] = useState([]);
+  const [customSections, setCustomSections] = useState(() => {
+    try { const saved = JSON.parse(localStorage.getItem("crm_custom_sale_sections") || "[]"); return Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : []; } catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem("crm_custom_sale_sections", JSON.stringify(customSections)); } catch { /* saqlab bo'lmadi */ } }, [customSections]);
+  // O'chirilgan standart bo'limlar (Qoralama, Brak va h.k.) nomi shu yerda saqlanadi.
+  const [hiddenDefaults, setHiddenDefaults] = useState(() => {
+    try { const saved = JSON.parse(localStorage.getItem("crm_hidden_sale_sections") || "[]"); return Array.isArray(saved) ? saved.filter((name) => typeof name === "string") : []; } catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem("crm_hidden_sale_sections", JSON.stringify(hiddenDefaults)); } catch { /* saqlab bo'lmadi */ } }, [hiddenDefaults]);
   const [addSectionOpen, setAddSectionOpen] = useState(false);
   const [newSectionPage, setNewSectionPage] = useState("");
   const inputRef = useRef(null);
@@ -90,6 +104,33 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
     return () => window.removeEventListener("crm-currency-change", updateCurrency);
   }, []);
 
+  const refreshRate = useCallback(async () => {
+    if (getCurrencyRateMode() !== "cbu") return;
+    if (rateFetchInFlight.current) return;
+    rateFetchInFlight.current = true;
+    setRateLoading(true);
+    setRateError("");
+    try {
+      const metadata = await refreshCentralBankUsdRate();
+      setRateMeta(metadata);
+      setCurrency(getCurrencySettings());
+    } catch (error) {
+      setRateMeta(getCentralBankRateMeta());
+      setRateError(error?.message || "Kursni olib bo'lmadi");
+    } finally {
+      rateFetchInFlight.current = false;
+      setRateLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (rateMode === "cbu") refreshRate();
+    const timer = window.setInterval(() => {
+      if (getCurrencyRateMode() === "cbu") refreshRate();
+    }, 30 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshRate, rateMode]);
+
   // Telefonda (≤700px) "1$" tugmasi yashirin: USD bosilganda har safar kurs oynasi ochiladi.
   const [compactCurrency, setCompactCurrency] = useState(() => matchesQuery(COMPACT_QUERY));
   useEffect(() => {
@@ -115,6 +156,7 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
   const openRateEditor = (event) => {
     rateOriginRef.current = event?.currentTarget || null;
     setRateDraft(String(currency.usdRate || ""));
+    if (rateMode === "cbu") refreshRate();
     setRateModal(true);
   };
   const closeRateEditor = () => {
@@ -137,11 +179,27 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
-  const saveRate = (event) => {
-    event.preventDefault();
-    const usdRate = Number(String(rateDraft).replace(/,/g, ""));
-    if (!Number.isFinite(usdRate) || usdRate <= 0) return;
-    setCurrency(saveCurrencySettings({ code: "USD", usdRate }));
+  const selectUsd = () => {
+    if (!currency.usdRate) return;
+    setCurrency(saveCurrencySettings({ ...currency, code: "USD" }));
+    closeRateEditor();
+  };
+
+  const chooseRateMode = (mode) => {
+    setCurrencyRateMode(mode);
+    setRateMode(mode);
+    setRateError("");
+    if (mode === "manual") setRateDraft(String(currency.usdRate || ""));
+    else refreshRate();
+  };
+
+  const saveManualRate = () => {
+    const result = saveManualUsdRate(rateDraft);
+    if (!result) return;
+    setCurrency(result.settings);
+    setRateMeta(result.metadata);
+    setRateMode("manual");
+    setRateError("");
     closeRateEditor();
   };
 
@@ -181,13 +239,18 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
   const accessiblePages = buildNavItems(t).flatMap((item) => item.children || [item])
     .filter((item) => item.id && canAccess(user, item.id));
   const availablePages = accessiblePages.filter((item) => !menuPages.has(item.id));
-  const saleSections = [
-    { label: "Qoralama", icon: FileText, color: "#8b5cf6", bg: "rgba(139,92,246,.10)" },
-    { label: "Band qilingan", icon: CalendarClock, color: "#f59e0b", bg: "rgba(245,158,11,.12)" },
+  const defaultSaleSections = [
+    { label: "Qoralama", page: "drafts", icon: FileText, color: "#8b5cf6", bg: "rgba(139,92,246,.10)" },
+    { label: "Band qilingan", page: "orders", icon: CalendarClock, color: "#f59e0b", bg: "rgba(245,158,11,.12)" },
     { label: "Mijoz bor", icon: UserRound, color: "#2563eb", bg: "rgba(37,99,235,.10)" },
-    { label: "Qaytmalar", icon: RotateCcw, color: "#0f9f82", bg: "rgba(15,159,130,.10)" },
-    { label: "Brak", icon: PackageX, color: "#e45555", bg: "rgba(228,85,85,.10)" },
-    { label: "Yetkazib berish", icon: CalendarClock, color: "#d28b16", bg: "rgba(210,139,22,.12)" },
+    { label: "Qaytmalar", page: "sales-returns", icon: RotateCcw, color: "#0f9f82", bg: "rgba(15,159,130,.10)" },
+    { label: "Brak", page: "defective-products", icon: PackageX, color: "#e45555", bg: "rgba(228,85,85,.10)" },
+    { label: "Yetkazib berish", page: "pending-pickups", icon: CalendarClock, color: "#d28b16", bg: "rgba(210,139,22,.12)" },
+  ];
+  const availableSaleSections = defaultSaleSections.filter((section) => !section.page || canAccess(user, section.page));
+  const hiddenDefaultSections = availableSaleSections.filter((section) => hiddenDefaults.includes(section.label));
+  const saleSections = [
+    ...availableSaleSections.filter((section) => !hiddenDefaults.includes(section.label)),
     ...accessiblePages.filter((item) => customSections.includes(item.id)).map((item) => ({ ...item, color: "#64748b", bg: "rgba(100,116,139,.10)" })),
   ];
   const openSaleSection = (label, pageId) => {
@@ -196,8 +259,20 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
     setSaleSectionsOpen(false);
     setAddSectionOpen(false);
   };
+  // Hamma bo'limni o'chirish mumkin: o'zi qo'shgan sahifa (id bor) yoki standart bo'lim (faqat label).
+  const removeSaleSection = (pageId, label) => {
+    if (pageId) setCustomSections((current) => current.filter((id) => id !== pageId));
+    else setHiddenDefaults((current) => current.includes(label) ? current : [...current, label]);
+  };
   const addSaleSection = (event) => {
     event.preventDefault();
+    if (newSectionPage.startsWith("default:")) {
+      const name = newSectionPage.slice("default:".length);
+      setHiddenDefaults((current) => current.filter((label) => label !== name));
+      setNewSectionPage("");
+      setAddSectionOpen(false);
+      return;
+    }
     const page = availablePages.find((item) => item.id === newSectionPage);
     if (!page) return;
     setCustomSections((current) => current.includes(page.id) ? current : [...current, page.id]);
@@ -292,7 +367,7 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
 
         {/* O'ng tomon: Til almashtirish, Dark mode, Yangi sotuv va Profil */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {currency.enabled.length > 1 && <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }} title={currency.usdRate ? `1 USD = ${currency.usdRate.toLocaleString("en-US")} UZS` : tx("Dollar kursini kiriting")}>
+          {currency.enabled.length > 1 && <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }} title={currency.usdRate ? `1 USD = ${currency.usdRate.toLocaleString("en-US")} UZS · ${tx("Markaziy bank kursi")}` : tx("Markaziy bank kursi olinmoqda")}>
             {currency.enabled.map((code) => <button key={code} type="button" onClick={(event) => changeCurrency(code, event)} aria-label={code === "USD" && compactCurrency ? tx("Dollar kursini kiritish va USD tanlash") : undefined} className="lang-switch-btn" style={{ padding: "5px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700, border: 0, background: currency.code === code ? "var(--brand)" : "transparent", color: currency.code === code ? "#fff" : "var(--text-muted)" }}>{code}</button>)}
             {currency.enabled.includes("USD") && <button type="button" className="currency-rate-btn" onClick={openRateEditor} aria-label={tx("Dollar kursini sozlash")} title={tx("Dollar kursini sozlash")} style={{ border: 0, borderLeft: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 10, padding: "4px 6px" }}>1$</button>}
           </div>}
@@ -401,18 +476,33 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
       >
         <div className="sale-section-modal">
           <div className="sale-section-grid">
-            {saleSections.map(({ id, label, icon: SectionIcon, color, bg }) => (
-              <button
-                type="button"
-                key={id || label}
-                className="sale-section-option"
-                onClick={() => openSaleSection(label, id)}
-              >
-                <span className="sale-section-icon" style={{ color, background: bg }}><SectionIcon size={19} /></span>
-                <span className="sale-section-label">{tx(label)}</span>
-                <span className="sale-section-arrow" aria-hidden="true">›</span>
-              </button>
-            ))}
+            {saleSections.map(({ id, label, icon: SectionIcon, color, bg }) => {
+              // Hamma bo'limni o'chirish mumkin (standart ham, o'zi qo'shgani ham).
+              const removable = true;
+              const itemKey = id || label;
+              const option = (
+                <button
+                  type="button"
+                  className={`sale-section-option${removable ? " is-removable" : ""}`}
+                  onClick={() => openSaleSection(label, id)}
+                >
+                  <span className="sale-section-icon" style={{ color, background: bg }}><SectionIcon size={19} /></span>
+                  <span className="sale-section-label">{tx(label)}</span>
+                </button>
+              );
+              return removable ? (
+                <div className="sale-section-item" key={itemKey}>
+                  {option}
+                  <button
+                    type="button"
+                    className="sale-section-remove"
+                    aria-label={`${tx("Bo‘limni o‘chirish")}: ${tx(label)}`}
+                    title={tx("Bo‘limni o‘chirish")}
+                    onClick={() => removeSaleSection(id, label)}
+                  ><Trash2 size={16} /></button>
+                </div>
+              ) : option;
+            })}
             <button type="button" className="sale-section-option sale-section-add" onClick={() => setAddSectionOpen((open) => !open)}>
               <span className="sale-section-icon"><Plus size={19} /></span>
               <span className="sale-section-label">{tx("Bo‘lim qo‘shish")}</span>
@@ -422,7 +512,8 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
           {addSectionOpen && (
             <form className="sale-section-add-form" onSubmit={addSaleSection}>
               <select autoFocus value={newSectionPage} onChange={(event) => setNewSectionPage(event.target.value)} aria-label={tx("Sahifani tanlang")}>
-                <option value="">{tx(availablePages.length ? "Sahifani tanlang" : "Qo‘shish uchun sahifa qolmadi")}</option>
+                <option value="">{tx(availablePages.length || hiddenDefaultSections.length ? "Sahifani tanlang" : "Qo‘shish uchun sahifa qolmadi")}</option>
+                {hiddenDefaultSections.map((item) => <option key={"default:" + item.label} value={"default:" + item.label}>{tx(item.label)}</option>)}
                 {availablePages.map((item) => <option key={item.id} value={item.id}>{tx(item.label)}</option>)}
               </select>
               <button type="submit" disabled={!newSectionPage.trim()}>{tx("Qo‘shish")}</button>
@@ -433,11 +524,32 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
       </Modal>
 
       {rateModal && createPortal(<div ref={rateBackdropRef} data-motion="manual" className={`crm-content-modal currency-rate-modal${compactCurrency ? " is-screen" : ""}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeRateEditor(); }}>
-        <form ref={rateCardRef} role="dialog" aria-modal="true" aria-labelledby="currency-rate-title" onSubmit={saveRate} className="currency-rate-card" style={{ width: "min(100%, 420px)", padding: 24, borderRadius: 18, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
-          <div className="flex items-start justify-between gap-3 mb-5"><div><h2 id="currency-rate-title" className="font-display font-bold text-lg">{tx("Dollar kursi")}</h2><p className="text-xs mt-1 text-muted-color">{tx("1 USD necha so'm ekanini kiriting. Barcha narxlar shu kursda ko'rsatiladi.")}</p></div><button type="button" onClick={closeRateEditor} aria-label={tx("Yopish")}><X size={18}/></button></div>
-          <label className="block text-sm font-semibold">{tx("1 USD = UZS")}<input className="input-base mt-1.5" type="number" inputMode="decimal" min="1" step="any" required autoFocus value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} placeholder="Masalan: 12 500" /></label>
-          <div className="flex justify-end gap-2 mt-5"><button type="button" className="btn-ghost" onClick={closeRateEditor}>{tx("Bekor qilish")}</button><button type="submit" className="btn-primary">{tx("Saqlash va USD tanlash")}</button></div>
-        </form>
+        <section ref={rateCardRef} role="dialog" aria-modal="true" aria-labelledby="currency-rate-title" className="currency-rate-card" style={{ width: "min(100%, 420px)", padding: 24, borderRadius: 18, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+          <div className="flex items-start justify-between gap-3 mb-4"><div><h2 id="currency-rate-title" className="font-display font-bold text-lg">{tx("Dollar kursi")}</h2><p className="text-xs mt-1 text-muted-color">{tx(rateMode === "cbu" ? "Markaziy bankning rasmiy USD kursi avtomatik yangilanadi." : "Qo'lda kiritilgan kurs USD narxlari uchun ishlatiladi.")}</p></div><button type="button" onClick={closeRateEditor} aria-label={tx("Yopish")}><X size={18}/></button></div>
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button type="button" className={rateMode === "cbu" ? "btn-primary justify-center text-xs" : "btn-ghost justify-center text-xs"} aria-pressed={rateMode === "cbu"} onClick={() => chooseRateMode("cbu")}>{tx("Avtomatik (Markaziy bank)")}</button>
+            <button type="button" className={rateMode === "manual" ? "btn-primary justify-center text-xs" : "btn-ghost justify-center text-xs"} aria-pressed={rateMode === "manual"} onClick={() => chooseRateMode("manual")}>{tx("Qo'lda kiritish")}</button>
+          </div>
+          {rateMode === "cbu" ? <>
+            <div className="rounded-xl p-4" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+              <div className="text-sm font-semibold text-muted-color">{tx("1 USD")}</div>
+              <div className="mt-1 font-display font-bold text-2xl" style={{ color: "var(--brand)" }}>{currency.usdRate ? `${currency.usdRate.toLocaleString("en-US", { maximumFractionDigits: 2 })} UZS` : tx(rateLoading ? "Kurs yuklanmoqda..." : "Kurs hali olinmadi")}</div>
+              <div className="mt-2 text-xs text-muted-color">{tx("Kurs sanasi")}: {rateMeta?.date || "—"}</div>
+              {rateMeta?.diff !== null && rateMeta?.diff !== undefined && Number.isFinite(Number(rateMeta.diff)) && <div className="mt-1 text-xs text-muted-color">{tx("Kunlik o'zgarish")}: {Number(rateMeta.diff) > 0 ? "+" : ""}{Number(rateMeta.diff).toLocaleString("en-US", { maximumFractionDigits: 2 })} UZS</div>}
+            </div>
+            <div className="flex items-center justify-between gap-3 mt-3 text-xs text-muted-color">
+              <a href="https://cbu.uz/uz/arkhiv-kursov-valyut/veb-masteram/" target="_blank" rel="noreferrer" className="underline">{tx("Manba")}: cbu.uz</a>
+              <button type="button" className="btn-ghost" onClick={refreshRate} disabled={rateLoading}>{rateLoading ? tx("Yangilanmoqda...") : tx("Yangilash")}</button>
+            </div>
+            {rateError && <p role="status" className="mt-3 text-xs" style={{ color: "var(--danger, #ef4444)" }}>{currency.usdRate ? tx("Kurs yangilanmadi, oxirgi saqlangan qiymat ko'rsatilmoqda.") : tx("Kursni olish imkoni bo'lmadi. Internetni tekshirib, qayta yangilang.")}<span className="block mt-1 opacity-80">{rateError}</span></p>}
+          </> : <>
+            <label className="block text-sm font-semibold">{tx("1 USD = UZS")}
+              <input className="input-base mt-1.5" type="number" inputMode="decimal" min="1" step="any" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} placeholder="Masalan: 12 500" autoFocus />
+            </label>
+            <p className="mt-2 text-xs text-muted-color">{tx("Saqlangandan keyin bu kurs avtomatik almashtirilmaydi.")}</p>
+          </>}
+          <div className="flex justify-end gap-2 mt-5"><button type="button" className="btn-ghost" onClick={closeRateEditor}>{tx("Bekor qilish")}</button>{rateMode === "manual" ? <button type="button" className="btn-primary" onClick={saveManualRate} disabled={!Number.isFinite(Number(String(rateDraft).replace(/,/g, ""))) || Number(String(rateDraft).replace(/,/g, "")) <= 0}>{tx("Kursni saqlash va USD tanlash")}</button> : <button type="button" className="btn-primary" onClick={selectUsd} disabled={!currency.usdRate}>{tx("USD tanlash")}</button>}</div>
+        </section>
       </div>, (compactCurrency ? document.body : document.getElementById("main-modal-root")) || document.body)}
 
       {/* Command Palette */}

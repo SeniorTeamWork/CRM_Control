@@ -16,15 +16,14 @@ import {
   UserCog,
   Clock,
 } from "lucide-react";
-import { employees } from "../data/mockData";
 import { readEmployees, saveEmployees } from "../data/employeeStore";
-import { ACCESS_SECTIONS, createCredentials, getDirector } from "../data/accessStore";
+import { ACCESS_SECTIONS, createCredentials, expandEmployeePermissions, getDirector } from "../data/accessStore";
 import { readDebtPayments, readPosSales, withDebtBalance } from "../data/debtPayments";
 import { dateKey, formatSalaryPeriod, monthKey, salaryMonthRows } from "../data/salaryHistory";
 import { useToast } from "../context/ToastContext";
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { ADDITIONAL_SALES_KEY, getReturns, getSales } from "../supabase/bolimlar/sotuvlar";
+import { getReturns } from "../supabase/bolimlar/sotuvlar";
 const roleColors = {
   Admin: { bg: "var(--brand-light)", color: "var(--brand)" },
   Manager: { bg: "var(--violet-light)", color: "var(--violet)" },
@@ -47,20 +46,7 @@ const readEmployeeSales = (employeeId) => {
   const payments = readDebtPayments().map((payment) => ({ ...payment, saleId: String(payment.saleId) }));
   let approvedReturns = [];
   try { approvedReturns = getReturns().filter((record) => record.status === "approved"); } catch { /* Show sales without return adjustments if the return list is unavailable. */ }
-  let additionalSales = [];
-  try {
-    const saved = getSales(ADDITIONAL_SALES_KEY);
-    if (Array.isArray(saved)) additionalSales = saved.map((sale) => ({
-      ...sale,
-      id: String(sale.id ?? sale.receiptNumber ?? ""),
-      amount: Number(sale.amount ?? sale.total ?? 0),
-      customer: sale.customer || sale.customerName || "Noma'lum mijoz",
-      products: Number(sale.products ?? sale.items?.length ?? 0),
-      payment: sale.payment || sale.paymentMethod || "Naqd",
-      createdAt: sale.createdAt || sale.date || "",
-    }));
-  } catch { /* Ignore unreadable secondary POS records. */ }
-  return [...readPosSales(), ...additionalSales]
+  return readPosSales()
     .map((sale) => withDebtBalance(sale, payments))
     .map((sale) => {
       const returnedAmount = approvedReturns.filter((record) => String(record.saleId) === String(sale.id)).reduce((sum, record) => sum + Number(record.amount || 0), 0);
@@ -78,8 +64,8 @@ export default function EmployeeDetail({ employeeId, onBack }) {
   const modalRoot = document.getElementById("main-modal-root");
   const modalDialogRef = useRef(null);
   const [initial] = useState(() => {
-    try { return readEmployees().find((e) => String(e.id) === String(employeeId)) || employees[0]; }
-    catch { return employees.find((e) => e.id === employeeId) || employees[0]; }
+    try { return readEmployees().find((e) => String(e.id) === String(employeeId)) || null; }
+    catch { return null; }
   });
   const [data, setData] = useState(initial);
   const [employeeSales, setEmployeeSales] = useState(() => readEmployeeSales(employeeId));
@@ -109,7 +95,9 @@ export default function EmployeeDetail({ employeeId, onBack }) {
     document.addEventListener("pointerdown", closeOnOutsideClick);
     return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, [showEdit, showDelete]);
-  const [form, setForm] = useState({ name: initial.name, role: initial.role, phone: initial.phone, status: initial.status, monthlySalary: initial.monthlySalary ?? "", salaryDueDay: initial.salaryDueDay ?? "", salaryStartMonth: initial.salaryStartMonth || monthKey(), login: initial.login || "", password: "", permissions: initial.permissions || [] });
+  const [form, setForm] = useState({ name: initial?.name || "", role: initial?.role || "Kassir", phone: initial?.phone || "", status: initial?.status || "active", monthlySalary: initial?.monthlySalary ?? "", salaryDueDay: initial?.salaryDueDay ?? "", salaryStartMonth: initial?.salaryStartMonth || monthKey(), login: initial?.login || "", password: "", permissions: expandEmployeePermissions(initial?.permissions || []) });
+
+  if (!data) return <div className="space-y-6 fade-in"><button type="button" onClick={onBack} className="app-back-button"><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button><div className="card p-6 text-sm" style={{ color: "var(--text-muted)" }}>{tx("Xodim topilmadi")}</div></div>;
 
   const rc = roleColors[data.role] || { bg: "var(--surface-2)", color: "var(--text-muted)" };
   const employeeRevenue = employeeSales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
@@ -223,13 +211,13 @@ export default function EmployeeDetail({ employeeId, onBack }) {
 
   return (
     <div className="space-y-6 fade-in">
-      <div className="flex items-center gap-4">
+      <div>
         <button
           type="button"
           onClick={onBack}
           className="app-back-button"
           aria-label={tx("Oldingi sahifaga qaytish")}
-          style={{ marginBottom: 0, flexShrink: 0 }}
+          style={{ marginBottom: 12 }}
         >
           <ArrowLeft size={16} aria-hidden="true" style={{ flexShrink: 0 }} />{tx("Orqaga")}</button>
         <div>
@@ -276,7 +264,7 @@ export default function EmployeeDetail({ employeeId, onBack }) {
             </div>
 
             <div className="grid grid-cols-2 gap-3 mt-5">
-              <button onClick={() => { setForm({ ...data, monthlySalary: data.monthlySalary ?? "", salaryDueDay: data.salaryDueDay ?? "", salaryStartMonth: data.salaryStartMonth || monthKey(), password: "", permissions: [...(data.permissions || [])] }); setShowEdit(true); }} className="btn-ghost text-sm justify-center">
+              <button onClick={() => { setForm({ ...data, monthlySalary: data.monthlySalary ?? "", salaryDueDay: data.salaryDueDay ?? "", salaryStartMonth: data.salaryStartMonth || monthKey(), password: "", permissions: expandEmployeePermissions(data.permissions || []) }); setShowEdit(true); }} className="btn-ghost text-sm justify-center">
                 <Edit2 size={14} />{tx(" Tahrirlash")}</button>
               <button
                 onClick={() => setShowDelete(true)}
@@ -395,7 +383,7 @@ export default function EmployeeDetail({ employeeId, onBack }) {
                     </label>
                     <label className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>{tx("To'langan sana")}<input className="input-base mt-1" type="date" value={salaryForm.paidAt} max={dateKey()} onChange={(event) => setSalaryForm({ ...salaryForm, paidAt: event.target.value })} required />
                     </label>
-                    <label className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>{tx("Summa (so'm)")}<input className="input-base mt-1" type="number" min="1" step="any" inputMode="decimal" value={moneyInputValue(salaryForm.amount, false)} onChange={(event) => setSalaryForm({ ...salaryForm, amount: String(toBaseMoney(event.target.value)) })} required />
+                    <label className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>{tx("Summa (so'm)")}<input placeholder="0" className="input-base mt-1" type="number" min="1" step="any" inputMode="decimal" value={moneyInputValue(salaryForm.amount, false)} onChange={(event) => setSalaryForm({ ...salaryForm, amount: String(toBaseMoney(event.target.value)) })} required />
                     </label>
                   </div>
                   {salaryError && <p role="alert" className="text-xs" style={{ color: "var(--danger)" }}>{tx(salaryError)}</p>}
@@ -508,12 +496,13 @@ export default function EmployeeDetail({ employeeId, onBack }) {
                 <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{tx("Yangi parol kamida 8 belgi bo'lishi kerak.")}</p>
               </div>
               <fieldset>
-                <legend className="block text-xs font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>{tx("Foydalanish mumkin bo'lgan bo'limlar")}</legend>
+                <legend className="block text-xs font-semibold mb-1" style={{ color: "var(--text-secondary)" }}>{tx("Foydalanish mumkin bo'lgan bo'limlar")}</legend>
+                <p className="mb-2 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Har bir ichki bo'limga alohida ruxsat beriladi.")}</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {ACCESS_SECTIONS.filter((section) => section.id !== "employees" && section.id !== "settings").map((section) => (
+                  {ACCESS_SECTIONS.map((section) => (
                     <label key={section.id} className="flex items-center gap-2 text-xs" style={{ color: "var(--text-secondary)" }}>
                       <input type="checkbox" checked={form.permissions.includes(section.id)} onChange={() => setForm((current) => ({ ...current, permissions: current.permissions.includes(section.id) ? current.permissions.filter((id) => id !== section.id) : [...current.permissions, section.id] }))} />
-                      {tx(section.label)}
+                      {section.group ? `${tx(section.group)} · ${tx(section.label)}` : tx(section.label)}
                     </label>
                   ))}
                 </div>

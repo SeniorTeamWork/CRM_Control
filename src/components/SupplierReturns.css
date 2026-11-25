@@ -68,3 +68,26 @@
 .supplier-return-detail-reason{padding:11px 12px;border:1px solid var(--border-subtle);border-radius:11px}
 .supplier-return-detail-reason p{margin:5px 0 0;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:520px){.supplier-return-detail-grid,.supplier-return-condition-grid{grid-template-columns:minmax(0,1fr)}.supplier-return-detail-amounts>div{align-items:flex-start}.supplier-return-detail-amounts span{max-width:62%}}
+
+.supplier-return-prompt-message{margin:0;color:var(--text-muted);text-align:center;line-height:1.5}
+.supplier-return-prompt-actions{display:flex;justify-content:center;margin-top:18px}
+.supplier-return-prompt-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-width:226px;min-height:42px;padding:0 16px}
+.supplier-return-prompt-countdown{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:24px;padding:0 6px;border-left:1px solid rgba(255,255,255,.4);font-variant-numeric:tabular-nums;font-weight:700}
+@media(max-width:420px){.supplier-return-prompt-button{min-width:0;width:100%}.supplier-return-prompt-actions{margin-top:14px}}
+
+.supplier-return-debt-payment{display:grid;gap:10px;margin-top:16px;padding:14px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--surface-2)}
+.supplier-return-debt-payment h4{margin:0;color:var(--text-primary);font-size:13px;font-weight:700}
+.supplier-return-debt-payment>label{font-size:11px;font-weight:600;color:var(--text-secondary)}
+.supplier-return-debt-payment-input{position:relative}
+.supplier-return-debt-payment-input input{width:100%;height:40px;padding-right:58px}
+.supplier-return-debt-payment-input span{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-muted)}
+.supplier-return-debt-payment-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.supplier-return-debt-payment-summary>div{display:grid;gap:6px;min-width:0;padding:12px;border-radius:10px;background:var(--surface)}
+.supplier-return-debt-payment-summary span{font-size:10px;color:var(--text-secondary)}
+.supplier-return-debt-payment-summary strong{font-size:13px;color:var(--text-primary);overflow-wrap:anywhere}
+.supplier-return-debt-payment-summary>div:last-child strong{color:var(--danger)}
+.supplier-return-debt-payment-submit{justify-self:start;min-height:36px;padding:0 14px;font-size:12px}
+@media(max-width:560px){.supplier-return-debt-payment-summary{grid-template-columns:1fr 1fr}.supplier-return-debt-payment-submit{width:100%;justify-content:center}}
+
+.supplier-return-debt-amount{color:var(--danger);font-weight:700}
+

@@ -55,10 +55,12 @@ export function summarizeOrderReturns(orderId, lines, returns) {
 export function calculateReturn(draft) {
  const goodQuantity = Number(draft.goodQuantity || 0), defectiveQuantity = Number(draft.defectiveQuantity || 0), refundedAmount = Number(draft.refundedAmount || 0);
  const amount = Math.round((goodQuantity*draft.goodCost + defectiveQuantity*draft.badCost)*100)/100;
- const debtOffset = Math.min(n(draft.orderDebt),amount), refundDue = Math.max(0,amount-debtOffset);
+ // Ta’minotchi qaytargan naqd pul ham umumiy qaytarish summasining bir qismi.
+ // Avval shu pulni hisobga olib, qolgan summanigina qarzdan ayiramiz.
+ const debtOffset = Math.min(n(draft.orderDebt),Math.max(0,amount-refundedAmount)), refundDue = Math.max(0,amount-debtOffset);
  const fractional = ['kg','g','l','ml','m','metr','m2','m3'].includes(draft.unit);
  const validQuantity = value => Number.isFinite(value) && value >= 0 && (fractional || Number.isInteger(value));
- const valid = Boolean(draft.reason?.trim()) && validQuantity(goodQuantity) && validQuantity(defectiveQuantity) && goodQuantity+defectiveQuantity>0 && goodQuantity<=draft.goodMax && defectiveQuantity<=draft.badMax && Number.isFinite(refundedAmount) && refundedAmount>=0 && refundedAmount<=refundDue && Number.isFinite(amount);
+ const valid = Boolean(draft.reason?.trim()) && validQuantity(goodQuantity) && validQuantity(defectiveQuantity) && goodQuantity+defectiveQuantity>0 && goodQuantity<=draft.goodMax && defectiveQuantity<=draft.badMax && Number.isFinite(refundedAmount) && refundedAmount>=0 && refundedAmount<=amount && Number.isFinite(amount);
  return {goodQuantity,defectiveQuantity,amount,debtOffset,refundDue,refundedAmount,supplierOwes: Math.max(0,refundDue-refundedAmount),valid};
 }
 export function reduceReturnStock(product, record, defectIds = []) {

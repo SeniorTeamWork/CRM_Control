@@ -468,3 +468,10 @@
   .sale-section-footer { align-items: stretch; flex-direction: column; }
   .sale-section-footer button { width: 100%; }
 }
+
+/* Qo'shilgan bo'limni o'chirish tugmasi */
+.sale-section-item { position: relative; display: flex; }
+.sale-section-item .sale-section-option { flex: 1; width: 100%; min-width: 0; }
+.sale-section-option.is-removable { padding-right: 54px; }
+.sale-section-remove { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-faint); cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.sale-section-remove:hover, .sale-section-remove:focus-visible { color: var(--danger); background: var(--danger-light); border-color: var(--danger); outline: none; }

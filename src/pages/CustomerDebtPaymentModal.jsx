@@ -3,17 +3,20 @@ import { translateText as tx } from "../locales/translateText";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import { useState } from "react";
 import { ShoppingBag, CreditCard, ChevronRight, CheckCircle, X } from "lucide-react";
-import { products as catalogProducts } from "../data/mockData";
+import { useProducts } from "../supabase/bolimlar/mahsulotlar";
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
+import { groupProductLines, uniqueProductCount } from "../data/productCounts";
 export function DebtPaymentModal({ sale, paymentAmount, setPaymentAmount, method, setMethod, selectedCardId, setSelectedCardId, completed, onSubmit, onClose, dialogRef }) {
   useUILanguage();
   const [showProducts, setShowProducts] = useState(true);
+  const catalogProducts = useProducts();
   const names = sale.items?.length
-    ? sale.items.map((item) => item.name).filter(Boolean)
-    : (sale.productIds || [])
+    ? groupProductLines(sale.items).map((group) => group.name).filter(Boolean)
+    : [...new Set(sale.productIds || [])]
       .map((id) => catalogProducts.find((product) => product.id === id)?.name)
       .filter(Boolean);
+  const productTypeCount = uniqueProductCount(sale.items, sale.products);
   const amount = Math.min(sale.debtBalance, Number(String(paymentAmount || "").replace(/\D/g, "")) || 0);
   return (
     <div className="crm-content-modal">
@@ -26,7 +29,7 @@ export function DebtPaymentModal({ sale, paymentAmount, setPaymentAmount, method
         <div className="customer-payment-summary">
           <div className="customer-payment-products-head">
             <span className="customer-payment-icon"><ShoppingBag size={20} /></span>
-            <div><strong>{tx("Olingan tovarlar")}</strong><small>{tx(sale.products)}{tx(" ta mahsulot · ")}{sale.id}</small></div>
+            <div><strong>{tx("Olingan tovarlar")}</strong><small>{tx(productTypeCount)}{tx(" ta mahsulot · ")}{sale.id}</small></div>
             <button type="button" onClick={() => setShowProducts((value) => !value)} aria-expanded={showProducts}>{tx("Batafsil ")}<ChevronRight size={15} className={showProducts ? "is-open" : ""} />
             </button>
           </div>

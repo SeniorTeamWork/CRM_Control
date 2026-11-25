@@ -15,7 +15,6 @@ import {
   UserPlus,
   Trash2,
 } from "lucide-react";
-import { customers as initialCustomers } from "../data/mockData";
 import { useToast } from "../context/ToastContext";
 import PhoneInput from "../components/PhoneInput";
 import { uzbekRegions } from "../data/regions";
@@ -115,7 +114,7 @@ export default function Customers({ filter, onNavigate }) {
   const [customerList, setCustomerList] = useState(() => {
     const saved = getData("crm_customers", null);
     if (Array.isArray(saved)) return saved;
-    return initialCustomers || [];
+    return [];
   });
   // Boshqa kassir yoki kompyuterda o'zgarsa, Supabase'dan kelgan yangi holat qayta o'qiladi.
   const dataVersion = useDataVersion();
@@ -166,6 +165,7 @@ export default function Customers({ filter, onNavigate }) {
 
     const newCustomer = {
       id: Date.now(),
+      createdAt: new Date().toISOString(),
       name: putSurnameLast(formData.name),
       phone: formData.phone.trim(),
       region: formData.region,
@@ -215,20 +215,39 @@ export default function Customers({ filter, onNavigate }) {
     setCustomerToDelete(null);
   };
 
-  const filtered = customerList.filter((c) => {
-    const q = search.toLowerCase().trim();
-    const cleanPhone = c.phone.replace(/\D/g, "");
-    const cleanSearchPhone = q.replace(/\D/g, "");
+  const filtered = customerList
+    .map((customer, index) => ({ customer, index }))
+    .filter(({ customer: c }) => {
+      const q = search.toLowerCase().trim();
+      const cleanPhone = c.phone.replace(/\D/g, "");
+      const cleanSearchPhone = q.replace(/\D/g, "");
 
-    const matchSearch =
-      c.name.toLowerCase().includes(q) ||
-      c.phone.toLowerCase().includes(q) ||
-      (cleanSearchPhone && cleanPhone.includes(cleanSearchPhone));
+      const matchSearch =
+        c.name.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        (cleanSearchPhone && cleanPhone.includes(cleanSearchPhone));
 
-    const matchTab = tab === "all" || c.status === tab;
+      const matchTab = tab === "all" || c.status === tab;
 
-    return matchSearch && matchTab;
-  });
+      return matchSearch && matchTab;
+    })
+    .sort((a, b) => {
+      const getCreatedAt = (customer) => {
+        const value = customer.createdAt || customer.created_at || customer.registrationDate;
+        const parsed = value ? new Date(value).getTime() : NaN;
+        if (Number.isFinite(parsed)) return parsed;
+        const idTimestamp = String(customer.id ?? "").match(/\d{13}/)?.[0];
+        const numericId = Number(idTimestamp || customer.id);
+        return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
+      };
+      const aCreated = getCreatedAt(a.customer);
+      const bCreated = getCreatedAt(b.customer);
+      if (aCreated !== null && bCreated !== null && aCreated !== bCreated) return bCreated - aCreated;
+      if (aCreated !== null && bCreated === null) return -1;
+      if (aCreated === null && bCreated !== null) return 1;
+      return b.index - a.index;
+    })
+    .map(({ customer }) => customer);
 
   const totalDebt = customerList
     .filter((c) => c.debt > 0)
@@ -425,12 +444,6 @@ export default function Customers({ filter, onNavigate }) {
                           <div>
                             <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                               {c.name}
-                            </div>
-                            <div
-                              className="text-xs"
-                              style={{ color: "var(--text-faint)" }}
-                            >
-                              {tx(c.region)}
                             </div>
                           </div>
                         </div>

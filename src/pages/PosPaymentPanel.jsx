@@ -6,6 +6,7 @@ import { FiCheckCircle, FiShoppingCart, FiX, FiCreditCard, FiCalendar } from "re
 import { formatDateInputValue } from './posHelpers';
 
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
 export function PaymentSuccessAnimation({ amount, remainingDebt, title = "To'lov qabul qilindi" }) {
   useUILanguage();
   return (
@@ -32,6 +33,7 @@ export function PosPaymentPanel({
   cart,
   total,
   paymentAmount,
+  previouslyPaidAmount = 0,
   setPaymentAmount,
   method,
   setMethod,
@@ -49,12 +51,14 @@ export function PosPaymentPanel({
   onClose,
 }) {
   useUILanguage();
+  const productTypeCount = uniqueProductCount(cart);
   const [showProducts, setShowProducts] = useState(true);
   const saleTotal = Math.round(total);
   const enteredAmount = paymentAmount === ""
     ? 0
-    : Math.min(saleTotal, Math.max(0, Number(paymentAmount) || 0));
-  const remaining = Math.max(0, saleTotal - (completed ? paidAmount : enteredAmount));
+    : Math.min(Math.max(0, saleTotal - Number(previouslyPaidAmount || 0)), Math.max(0, Number(paymentAmount) || 0));
+  const priorPaid = Math.min(saleTotal, Math.max(0, Number(previouslyPaidAmount || 0)));
+  const remaining = Math.max(0, saleTotal - (completed ? paidAmount : priorPaid + enteredAmount));
   return (
     <section className="pos-cart-section pos-order-panel pos-payment-panel" aria-label={tx("To'lovni qabul qilish")}>
       <div className="pos-payment-header">
@@ -66,7 +70,7 @@ export function PosPaymentPanel({
         <div className="pos-payment-summary">
           <div className="pos-payment-products-head">
             <span className="pos-payment-icon"><FiShoppingCart size={19} /></span>
-            <div><strong>{tx("Olingan tovarlar")}</strong><small>{tx(cart.length)}{tx(" ta mahsulot")}</small></div>
+            <div><strong>{tx("Olingan tovarlar")}</strong><small>{tx(productTypeCount)}{tx(" ta mahsulot")}</small></div>
             <button type="button" onClick={() => setShowProducts((open) => !open)} aria-expanded={showProducts}>{tx("Batafsil ")}<span aria-hidden="true">{tx(showProducts ? "⌄" : "›")}</span>
             </button>
           </div>
@@ -84,7 +88,8 @@ export function PosPaymentPanel({
           )}
           <div className="pos-payment-totals">
             <div><span>{tx("Jami to'lov")}</span><strong>{formatCurrency(saleTotal)}</strong></div>
-            <div><span>{tx("To'landi")}</span><strong className="is-paid">{formatCurrency(completed ? paidAmount : enteredAmount)}</strong></div>
+            {priorPaid > 0 && <div><span>{tx("Oldindan to‘langan")}</span><strong className="is-paid">{formatCurrency(priorPaid)}</strong></div>}
+            <div><span>{tx(completed ? "To'landi" : "To'lov summasi")}</span><strong className="is-paid">{formatCurrency(completed ? Math.max(0, paidAmount - priorPaid) : enteredAmount)}</strong></div>
             <div className="is-remaining"><span>{tx("Qolgan qarz")}</span><strong>{formatCurrency(remaining)}</strong></div>
           </div>
         </div>
@@ -99,10 +104,10 @@ export function PosPaymentPanel({
               onChange={(event) => {
                 const entered = event.target.value;
                 if (entered === "") setPaymentAmount("");
-                else setPaymentAmount(String(Math.min(saleTotal, Math.max(0, toBaseMoney(entered)))));
+                else setPaymentAmount(String(Math.min(Math.max(0, saleTotal - priorPaid), Math.max(0, toBaseMoney(entered)))));
                 setError("");
               }}
-              placeholder={tx("Oldindan to'lov (ixtiyoriy)")}
+              placeholder="0"
               disabled={completed}
               aria-label={tx("To'lanadigan summa")}
             />

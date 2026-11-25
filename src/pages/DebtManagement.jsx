@@ -144,7 +144,7 @@ function PaymentModal({ debtor, onClose, onPay }) {
               }}
             >{tx("To'lov miqdori")}</label>
             <div className="relative">
-              <input
+              <input placeholder="0"
                 type="number"
                 step="any"
                 value={moneyInputValue(amount, false)}

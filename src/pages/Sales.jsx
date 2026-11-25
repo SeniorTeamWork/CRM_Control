@@ -25,6 +25,7 @@ import { normalizeProductText, saleMatchesProduct } from "../data/salesProductFi
 import { reportDay } from "../data/reportPeriod";
 
 import { formatCurrency } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
 import { getProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getReturns } from "../supabase/bolimlar/sotuvlar";
 import { useDataVersion } from "../supabase/db";
@@ -468,7 +469,7 @@ export default function Sales({ onNavigate }) {
                     </td>
 
                     <td className="sales-muted">
-                      {tx(sale.products)}{tx(" ta")}</td>
+                      {tx(uniqueProductCount(sale.items, sale.products))}{tx(" ta")}</td>
 
                     <td className="sales-amount">
                       <div>{formatCurrency(sale.amount)}</div>

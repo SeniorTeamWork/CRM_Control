@@ -6,38 +6,73 @@ const DIRECTOR_KEY = "crm_director_account";
 const LOCAL_LOGIN_KEY = "crm_local_login_v1";
 export const SESSION_KEY = "crm_access_session";
 export const ACCESS_SECTIONS = [
-  { id: "dashboard", label: "Dashboard" }, { id: "sales", label: "Sotuvlar" },
-  { id: "orders", label: "Buyurtmalar" },
-  { id: "products", label: "Mahsulotlar" }, { id: "customers", label: "Mijozlar" },
-  { id: "suppliers", label: "Ta'minotchilar" }, { id: "employees", label: "Xodimlar" },
-  { id: "ustolar", label: "Ustolar" }, { id: "finance", label: "Moliya" },
-  { id: "reports", label: "Hisobotlar" }, { id: "settings", label: "Sozlamalar" },
-  { id: "ai-chat", label: "AI Chat" },
+  { id: "dashboard", label: "Bosh sahifa" },
+  { id: "sales-all", group: "Sotuvlar", label: "Barcha sotuvlar" },
+  { id: "sales-new", group: "Sotuvlar", label: "Yangi sotuv (POS)" },
+  { id: "sales-pos", group: "Sotuvlar", label: "Qo‘shimcha sotuv" },
+  { id: "sales-returns", group: "Sotuvlar", label: "Qaytmalar" },
+  { id: "orders-reservations", label: "Band qilinganlar" },
+  { id: "pending-pickups", label: "Yetkazib berish" },
+  { id: "products-all", group: "Mahsulotlar", label: "Barcha mahsulotlar" },
+  { id: "defective-products", group: "Mahsulotlar", label: "Brak mahsulotlar" },
+  { id: "customers-all", label: "Mijozlar" },
+  { id: "suppliers-main", group: "Ta'minotchilar", label: "Ta'minotchilar" },
+  { id: "suppliers-returns", group: "Ta'minotchilar", label: "Qaytarilgan tovarlar" },
+  { id: "employees", label: "Xodimlar" },
+  { id: "ustolar", label: "Ustolar" },
+  { id: "finance-revenue", group: "Moliya", label: "Daromad" },
+  { id: "finance-debt", group: "Moliya", label: "Qarzdorlik" },
+  { id: "finance-payables", group: "Moliya", label: "Biz qarzdor" },
+  { id: "reports", label: "Hisobotlar" },
+  { id: "settings", label: "Sozlamalar" },
+  { id: "ai-chat", label: "AI suhbat" },
   { id: "drafts", label: "Qoralama" },
 ];
 
+const LEGACY_PERMISSION_GROUPS = {
+  sales: ["sales-all", "sales-new", "sales-pos", "sales-returns"],
+  products: ["products-all", "defective-products"],
+  customers: ["customers-all"],
+  suppliers: ["suppliers-main", "suppliers-returns"],
+  orders: ["orders-reservations", "pending-pickups"],
+  finance: ["finance-revenue", "finance-debt", "finance-payables"],
+};
+const legacyGroupForPage = Object.fromEntries(
+  Object.entries(LEGACY_PERMISSION_GROUPS).flatMap(([group, pages]) => pages.map((page) => [page, group]))
+);
+
+export function expandEmployeePermissions(permissions = []) {
+  const selected = new Set(Array.isArray(permissions) ? permissions : []);
+  Object.entries(LEGACY_PERMISSION_GROUPS).forEach(([group, pages]) => {
+    if (!selected.has(group)) return;
+    if (!ACCESS_SECTIONS.some((section) => section.id === group)) selected.delete(group);
+    pages.forEach((page) => selected.add(page));
+  });
+  return [...selected];
+}
+
 export function sectionForPage(page) {
   if (page === "help" || page === "notifications") return null;
-  if (page.startsWith("customer-")) return "customers";
-  if (page.startsWith("product-")) return "products";
-  if (page === "suppliers-returns") return "suppliers";
-  if (page.startsWith("supplier-")) return "suppliers";
+  if (page === "orders") return "orders-reservations";
+  if (page === "suppliers") return "suppliers-main";
+  if (ACCESS_SECTIONS.some((section) => section.id === page)) return page;
+  if (page.startsWith("customer-") || page.startsWith("customers-")) return "customers-all";
+  if (page.startsWith("product-") || page.startsWith("products-")) return "products-all";
+  if (page.startsWith("sales-")) return page;
+  if (page.startsWith("finance-")) return page;
+  if (page.startsWith("supplier-")) return "suppliers-main";
   if (page.startsWith("employee-")) return "employees";
-  if (page.startsWith("debt-")) return "finance";
-  if (page.startsWith("sales-")) return "sales";
-  if (page === "orders" || page === "pending-pickups") return "orders";
-  if (page.startsWith("products-")) return "products";
-  if (page.startsWith("customers-")) return "customers";
-  if (page.startsWith("finance-")) return "finance";
+  if (page.startsWith("debt-")) return "finance-debt";
   return page;
 }
 
 export function canAccess(user, page) {
   if (!user) return false;
-  if (page === "defective-products") return true;
   if (user.type === "director") return true;
   const section = sectionForPage(page);
-  return !section || user.permissions?.includes(section);
+  if (!section) return true;
+  const permissions = user.permissions || [];
+  return permissions.includes(section) || permissions.includes(legacyGroupForPage[section]);
 }
 
 export function getDirector() {
@@ -154,6 +189,16 @@ export async function authenticate(login, password) {
   }
   recordFailure("crm");
   throw new Error("Login yoki parol noto'g'ri, yoxud xodim hisobi faol emas.");
+}
+
+// Sahifa yangilanganda (F5 / Ctrl+R) login so'ralmasligi uchun sessiya shu tabda (sessionStorage) saqlanadi.
+// Tab yopilsa sessiya o'chadi. Parol saqlanmaydi; tiklashda hisob qayta tekshiriladi (readSession).
+export function writeSession(account) {
+  try { if (account) sessionStorage.setItem(SESSION_KEY, JSON.stringify(account)); } catch { /* saqlab bo'lmadi */ }
+}
+
+export function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch { /* yo'q */ }
 }
 
 export function readSession() {

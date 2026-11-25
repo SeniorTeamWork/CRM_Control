@@ -12,7 +12,6 @@ import {
   TrendingUp,
   UserCog,
 } from "lucide-react";
-import { employees as employeesSeed } from "../data/mockData";
 import { readEmployees, saveEmployees } from "../data/employeeStore";
 import Modal, { Field } from "../components/Modal";
 import PhoneInput from "../components/PhoneInput";
@@ -45,7 +44,7 @@ export default function Employees({ onNavigate }) {
   useUILanguage();
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState(() => {
-    try { return readEmployees(); } catch { return employeesSeed; }
+    try { return readEmployees(); } catch { return []; }
   });
   // Boshqa kassir yoki kompyuterda o'zgarsa, Supabase'dan kelgan yangi holat qayta o'qiladi.
   const dataVersion = useDataVersion();
@@ -597,9 +596,9 @@ export default function Employees({ onNavigate }) {
           <Field label={tx("Kirish paroli")} hint={tx("Kamida 8 belgi")}>
             <input className="input-base" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" />
           </Field>
-          <Field label={tx("Foydalanish mumkin bo'lgan bo'limlar")}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, maxHeight: 170, overflowY: "auto" }}>
-              {ACCESS_SECTIONS.filter((section) => section.id !== "employees" && section.id !== "settings").map((section) => (
+          <Field label={tx("Foydalanish mumkin bo'lgan bo'limlar")} hint={tx("Har bir ichki bo'limga alohida ruxsat beriladi.")}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+              {ACCESS_SECTIONS.map((section) => (
                 <label key={section.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                   <input type="checkbox" checked={form.permissions.includes(section.id)} onChange={() => setForm((current) => ({
                     ...current,
@@ -607,7 +606,7 @@ export default function Employees({ onNavigate }) {
                       ? current.permissions.filter((id) => id !== section.id)
                       : [...current.permissions, section.id],
                   }))} />
-                  {tx(section.label)}
+                  {section.group ? `${tx(section.group)} · ${tx(section.label)}` : tx(section.label)}
                 </label>
               ))}
             </div>

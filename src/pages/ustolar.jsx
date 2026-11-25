@@ -850,7 +850,7 @@ export default function Ustolar({ profileUsta, setProfileUsta }) {
                     }}
                   >{tx("Balans (so‘m)")}</label>
 
-                  <input
+                  <input placeholder="0"
                     type="number"
                     value={moneyInputValue(formData.balance, false)}
                     onChange={(e) =>

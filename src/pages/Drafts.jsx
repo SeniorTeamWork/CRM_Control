@@ -5,6 +5,7 @@ import { useLanguage } from "../context/LanguageContext";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useToast } from "../context/ToastContext";
 import { deleteSaleDraft, readSavedSaleDrafts, requestSaleDraftResume } from "../data/savedSaleDrafts";
+import { groupProductLines, uniqueProductCount } from "../data/productCounts";
 import { formatCurrency } from "../data/currency";
 import PosWorkspace from "./PosWorkspace";
 import "./Drafts.css";
@@ -15,6 +16,10 @@ const DRAFT_POS_PREFIX = "crm_qoralama_pos_draft_";
 const read = () => { try { const data = getData(KEY, []); return Array.isArray(data) ? data.filter(n => n && typeof n.id === "string" && typeof n.title === "string" && typeof n.body === "string") : []; } catch { return []; } };
 const date = (value, lang) => new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "uz-UZ", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tashkent" }).format(new Date(value));
 const capitalizeSearch = value => String(value).replace(/(^|\s)(\p{L})/gu, (_, space, letter) => space + letter.toLocaleUpperCase("uz-UZ"));
+const saleDraftTime = draft => {
+  const timestamp = Date.parse(draft.savedAt || draft.openedAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
 export default function Drafts({ onBack, onNavigate }) {
   const { lang } = useLanguage();
   const [notes, setNotes] = useState(read);
@@ -44,11 +49,11 @@ export default function Drafts({ onBack, onNavigate }) {
   };
   const searchTerm = query.trim().toLocaleLowerCase("uz-UZ");
   const visible = notes.filter(n => !searchTerm || (n.title + " " + n.body).toLocaleLowerCase("uz-UZ").includes(searchTerm)).sort((a,b) => a.title.localeCompare(b.title, "uz", { sensitivity: "base" }));
-  const visibleSales = saleDrafts.filter(draft => !searchTerm || [draft.customerName, draft.customerPhone, ...(draft.cart || []).map(item => item.name)].join(" ").toLocaleLowerCase("uz-UZ").includes(searchTerm)).sort((a,b) => String(a.customerName || "").localeCompare(String(b.customerName || ""), "uz", { sensitivity: "base" }));
+  const visibleSales = saleDrafts.filter(draft => !searchTerm || [draft.customerName, draft.customerPhone, ...(draft.cart || []).map(item => item.name)].join(" ").toLocaleLowerCase("uz-UZ").includes(searchTerm)).sort((a,b) => saleDraftTime(b) - saleDraftTime(a));
   const totalDrafts = notes.length + saleDrafts.length;
   const pinnedDrafts = notes.filter(note => note.pinned).length;
   const resumeSale = draft => {
-    if (!requestSaleDraftResume({ ...draft, workspaceKey: DRAFT_POS_WORKSPACE, draftKeyPrefix: DRAFT_POS_PREFIX })) {
+    if (!requestSaleDraftResume({ ...draft, sourceSaleDraftId: draft.id, workspaceKey: DRAFT_POS_WORKSPACE, draftKeyPrefix: DRAFT_POS_PREFIX })) {
       toast.error("Sotuv ochilmadi", "Saqlangan sotuvni yuklash uchun xotirada joy yetarli emas.");
       return;
     }
@@ -65,7 +70,7 @@ export default function Drafts({ onBack, onNavigate }) {
   if (saleMode) return <section className="drafts-page draft-sale-page">
     <div className="draft-sale-topbar"><button className="app-back-button" onClick={() => setSaleMode(false)}><ArrowLeft size={16}/>{tx("Orqaga")}</button></div>
     <div className="draft-sale-content app-pos-content">
-      <PosWorkspace workspaceKey={DRAFT_POS_WORKSPACE} draftKeyPrefix={DRAFT_POS_PREFIX} migrateLegacyDraft={false}/>
+      <PosWorkspace workspaceKey={DRAFT_POS_WORKSPACE} draftKeyPrefix={DRAFT_POS_PREFIX} migrateLegacyDraft={false} hideCustomerTabs onSaleActionComplete={() => setSaleMode(false)}/>
     </div>
   </section>;
   if (editor) return <section className="drafts-page draft-detail">
@@ -86,9 +91,9 @@ export default function Drafts({ onBack, onNavigate }) {
         </button>
         {visibleSales.map(draft => (
           <article className="saved-sale-draft saved-sale-draft-tile" key={`sale-${draft.id}`}>
-            <div className="saved-sale-draft-top"><span><ShoppingCart size={16}/>{tx("Sotuv qoralamasi")}</span><time dateTime={draft.openedAt || draft.savedAt}>{date(draft.openedAt || draft.savedAt, lang)}</time></div>
+            <div className="saved-sale-draft-top"><span><ShoppingCart size={16}/>{tx("Sotuv qoralamasi")}</span><time dateTime={draft.savedAt || draft.openedAt}>{date(draft.savedAt || draft.openedAt, lang)}</time></div>
             <div className="saved-sale-customer"><span className="saved-sale-avatar">{(draft.customerName || "M").slice(0, 1).toLocaleUpperCase("uz-UZ")}</span><div><h3>{draft.customerName || tx("Mijoz ko‘rsatilmagan")}</h3><p className="saved-sale-draft-phone">{draft.customerPhone ? `+998 ${String(draft.customerPhone).replace(/(\d{2})(\d{3})(\d{2})(\d{2})/, "$1 $2 $3 $4")}` : tx("Telefon kiritilmagan")}</p></div></div>
-            <div className="saved-sale-draft-products">{(draft.cart || []).slice(0, 2).map(item => <span key={item.cartKey || item.id}>{item.name} · {item.qty} {tx("dona")}</span>)}{draft.cart?.length > 2 && <span>+ {tx("yana")} {draft.cart.length - 2} {tx("xil mahsulot")}</span>}</div>
+            <div className="saved-sale-draft-products">{groupProductLines(draft.cart).slice(0, 2).map(group => <span key={group.identity}>{group.name} · {group.items.reduce((sum, item) => sum + Number(item.qty || 0), 0)} {tx("dona")}</span>)}{uniqueProductCount(draft.cart) > 2 && <span>+ {tx("yana")} {uniqueProductCount(draft.cart) - 2} {tx("xil mahsulot")}</span>}</div>
             <div className="saved-sale-draft-summary"><span>{tx("Jami summa")}</span><strong>{formatCurrency(saleDraftTotal(draft))}</strong></div>
             <footer><button className="saved-sale-delete" onClick={() => setDeletingSale(draft)}>{tx("O‘chirish")}</button><button className="saved-sale-resume" onClick={() => resumeSale(draft)}><Play size={15}/>{tx("Davom ettirish")}</button></footer>
           </article>

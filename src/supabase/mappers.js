@@ -4,6 +4,7 @@
 // qaytib o'qilganda hech narsa yo'qolmaydi. Oddiy ustunlar (nomi, narx, qoldiq ...) esa
 // hisobot va view'lar (v_dashboard, v_sotuvlar ...) ishlashi uchun to'ldiriladi.
 // Eski (Supabase'ga qo'lda kiritilgan) qatorlarda malumot bo'sh bo'lsa, obyekt ustunlardan tiklanadi.
+import { uniqueProductCount } from "../data/productCounts";
 
 /* ---------------- Yordamchi funksiyalar ---------------- */
 
@@ -182,7 +183,7 @@ export const saleFromRow = (row, ctx) => {
       ...(item.isDefectSale || item.defectId ? { isDefectSale: true, defectId: item.defectId, defectStatus: item.defectStatus, defectReason: item.defectReason } : {}),
     };
   });
-  return merge({
+  const mapped = merge({
     id: row.ilova_id || row.id,
     receiptNumber: row.chek_raqami || row.id,
     customerId: ctx.appIdOf("mijozlar", row.mijoz_id),
@@ -205,9 +206,10 @@ export const saleFromRow = (row, ctx) => {
     deliveryAddresses: arr(row.yetkazish_manzillari),
     date: row.sana,
     items,
-    products: items.length,
-    productIds: items.map((item) => item.id),
+    products: uniqueProductCount(items),
+    productIds: [...new Set(items.map((item) => item.id))],
   }, row.malumot);
+  return { ...mapped, products: uniqueProductCount(mapped.items, mapped.products), productIds: [...new Set((mapped.items || []).map((item) => item.id))] };
 };
 
 export const supplierToRow = (s) => ({

@@ -4,8 +4,10 @@ import { CreditCard, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useLanguage } from "../context/LanguageContext";
 import { translateText as tx } from "../locales/translateText";
 import { useToast } from "../context/ToastContext";
+import ConfirmDialog from "./ConfirmDialog";
 import { cardDigits, formatCardNumber, readDirectorCards, recordedCardTotal, saveDirectorCards } from "../data/directorCards";
 import { readDebtPayments, readPosSales } from "../data/debtPayments";
+import { readOrders } from "../data/ordersStore";
 import { formatCurrency } from "../data/currency";
 import "./ReceivingCards.css";
 
@@ -21,6 +23,7 @@ export default function DirectorCardsSettings({ user }) {
   if (user?.type !== "director") return null;
   const sales = readPosSales();
   const payments = readDebtPayments();
+  const orders = readOrders();
   const save = (next) => {
     try {
       setCards(saveDirectorCards(next, user));
@@ -55,14 +58,24 @@ export default function DirectorCardsSettings({ user }) {
       {!cards.length && <p className="director-cards-empty">{tx("Hali karta qo'shilmagan.")}</p>}
       <div className="director-cards-list">
         {cards.map((card) => <article key={card.id} className="director-card">
-          <div className="director-card-info"><strong>{card.label || card.holder}</strong><span className="director-card-number">{formatCardNumber(card.number)}</span><span>{card.holder}</span><small>{tx("CRMda qayd etilgan tushum")}: <b>{formatCurrency(recordedCardTotal(card, sales, payments))}</b></small></div>
+          <div className="director-card-info"><strong>{card.label || card.holder}</strong><span className="director-card-number">{formatCardNumber(card.number)}</span><span>{card.holder}</span><small>{tx("CRMda qayd etilgan tushum")}: <b>{formatCurrency(recordedCardTotal(card, sales, payments, orders))}</b></small></div>
           <div className="director-card-actions">
             <button type="button" aria-label={`${tx("Tahrirlash")}: ${card.label || card.holder}`} onClick={() => { setDraft(card); setEditing(true); }}><Pencil size={16} /></button>
             <button type="button" aria-label={`${tx("O'chirish")}: ${card.label || card.holder}`} onClick={() => setRemoving(card.id)}><Trash2 size={16} /></button>
           </div>
-          {removing === card.id && <div className="director-card-remove"><p>{tx("Karta ro'yxatdan o'chirilsinmi? Oldingi to'lovlar saqlanadi.")}</p><button type="button" onClick={() => { if (save(readDirectorCards().filter((item) => item.id !== card.id))) setRemoving(""); }}>{tx("O'chirish")}</button><button type="button" onClick={() => setRemoving("")}>{tx("Bekor qilish")}</button></div>}
         </article>)}
       </div>
+      <ConfirmDialog
+        open={!!removing}
+        title="Kartani o'chirasizmi?"
+        message="Karta ro'yxatdan o'chiriladi. Oldingi to'lovlar saqlanadi."
+        confirmLabel="O'chirish"
+        confirmDanger
+        onCancel={() => setRemoving("")}
+        onConfirm={() => {
+          if (save(readDirectorCards().filter((item) => item.id !== removing))) setRemoving("");
+        }}
+      />
       {editing && createPortal(<div className="crm-content-modal" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditing(false); }}>
         <form className="director-card-form director-card-modal" onSubmit={submit}>
           <div className="director-card-modal-heading"><div><h3>{tx(draft.id ? "Kartani tahrirlash" : "Karta qo'shish")}</h3><p>{tx("Karta ma'lumotlarini kiriting")}</p></div><button type="button" aria-label={tx("Yopish")} onClick={() => setEditing(false)}><X size={18} /></button></div>

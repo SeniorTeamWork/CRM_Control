@@ -299,7 +299,7 @@ function AppearanceContent() {
         <div className="grid sm:grid-cols-2 gap-3">
           {[
             { code: "UZS", title: "So'm (UZS)", description: "O'zbekiston so'mi" },
-            { code: "USD", title: "AQSH dollari (USD)", description: currencySettings.usdRate ? `1 USD = ${currencySettings.usdRate.toLocaleString("en-US")} UZS` : "USD kursini tanlashda kiritasiz" },
+            { code: "USD", title: "AQSH dollari (USD)", description: currencySettings.usdRate ? `1 USD = ${currencySettings.usdRate.toLocaleString("en-US")} UZS` : "USD kursini CBU'dan avtomatik olish yoki qo'lda kiritish mumkin" },
           ].map(({ code, title, description }) => {
             const enabled = currencySettings.enabled.includes(code);
             const onlyEnabled = enabled && currencySettings.enabled.length === 1;

@@ -21,6 +21,7 @@ import { addressPhoneDigits } from './posHelpers';
 import { PosPaymentPanel } from './PosPaymentPanel';
 
 import { formatCurrency } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
 export function CartPanelContent({
   cart,
   reservationMode = false,
@@ -63,6 +64,7 @@ export function CartPanelContent({
   customerError,
   paymentOpen,
   paymentAmount,
+  previouslyPaidAmount = 0,
   setPaymentAmount,
   paymentMethod,
   setPaymentMethod,
@@ -78,6 +80,7 @@ export function CartPanelContent({
   closePayment,
 }) {
   useUILanguage();
+  const cartProductCount = uniqueProductCount(cart);
   const [editingQtyId, setEditingQtyId] = useState(null);
   const [tempQty, setTempQty] = useState("");
   const [allItemsOpen, setAllItemsOpen] = useState(false);
@@ -158,7 +161,7 @@ export function CartPanelContent({
 
   return (
     <>
-      <section className="pos-cart-section pos-cart-items-panel" aria-label={tx("Savatchadagi mahsulotlar")} inert={paymentOpen}>
+      <section className="pos-cart-section pos-cart-items-panel" aria-label={tx("Savatchadagi mahsulotlar")}>
       <div className="cart-header">
         <FiShoppingCart size={20} className="cart-icon" />
         <h2>{tx("Savatcha")}</h2>
@@ -169,7 +172,7 @@ export function CartPanelContent({
           disabled={cart.length === 0}
           title={tx("Savatchadagi barcha mahsulotlar")}
         >
-          ({tx(cart.length)})
+          ({tx(cartProductCount)})
         </button>
         <button
           type="button"
@@ -362,6 +365,7 @@ export function CartPanelContent({
           cart={cart}
           total={total}
           paymentAmount={paymentAmount}
+          previouslyPaidAmount={previouslyPaidAmount}
           setPaymentAmount={setPaymentAmount}
           method={paymentMethod}
           setMethod={setPaymentMethod}
@@ -384,7 +388,7 @@ export function CartPanelContent({
       <div className="cart-header">
         <FiShoppingCart size={20} className="cart-icon" />
         <h2>{tx(reservationMode ? "Buyurtma tarkibi" : "Savatcha")}</h2>
-        <span className="cart-count">({tx(cart.length)})</span>
+        <span className="cart-count">({tx(cartProductCount)})</span>
         <button
           type="button"
           className="pos-cart-clear"
@@ -545,7 +549,8 @@ export function CartPanelContent({
               {addresses.map((address, index) => {
                 const productCount = cart.filter(
                   (item) => item.addressId === address.id || (!item.addressId && index === 0)
-                ).length;
+                );
+                const uniqueAddressProductCount = uniqueProductCount(productCount);
                 return (
                   <button
                     type="button"
@@ -563,7 +568,7 @@ export function CartPanelContent({
                       <strong>{address.name}</strong>
                       <small>{tx(address.address)}</small>
                     </span>
-                    <span className="pos-address-card-count">{tx(productCount)}{tx(" ta mahsulot")}</span>
+                    <span className="pos-address-card-count">{tx(uniqueAddressProductCount)}{tx(" ta mahsulot")}</span>
                   </button>
                 );
               })}
@@ -610,6 +615,16 @@ export function CartPanelContent({
             <span className="total-price">
               {formatCurrency(total)}</span>
           </div>
+          {Number(previouslyPaidAmount) > 0 && <>
+            <div className="summary-row">
+              <span>{tx("Oldindan to‘langan")}</span>
+              <span className="is-paid">{formatCurrency(Math.min(Number(total || 0), Number(previouslyPaidAmount || 0)))}</span>
+            </div>
+            <div className="summary-row">
+              <span>{tx("Qolgan to‘lov")}</span>
+              <span>{formatCurrency(Math.max(0, Number(total || 0) - Number(previouslyPaidAmount || 0)))}</span>
+            </div>
+          </>}
         </div>
         {/* SOTUVNI YAKUNLASH */}
 
@@ -622,7 +637,7 @@ export function CartPanelContent({
             onClick={onSaveDraft}
             disabled={cart.length === 0}
           >
-            <FiClock size={16} />{tx("Vaqtincha saqlash")}
+            <FiClock size={16} />{tx("Qoralamaga qo‘shish")}
           </button>
           <button
             type="button"
@@ -649,7 +664,7 @@ export function CartPanelContent({
         <div className="pos-cart-all-overlay" onClick={() => setAllItemsOpen(false)}>
           <div className="pos-cart-all-dialog" role="dialog" aria-modal="true" aria-label={tx("Savatchadagi barcha mahsulotlar")} onClick={(event) => event.stopPropagation()}>
             <div className="pos-cart-all-title">
-              <strong>{tx("Mahsulotlar (")}{tx(cart.length)})</strong>
+              <strong>{tx("Mahsulotlar (")}{tx(cartProductCount)})</strong>
               <button type="button" onClick={() => setAllItemsOpen(false)} aria-label={tx("Yopish")}><FiX size={18} /></button>
             </div>
             <div className="pos-cart-all-list">

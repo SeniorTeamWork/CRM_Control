@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Modal, { Field } from './Modal';
 import { Printer, RotateCcw, Search } from 'lucide-react';
 import { formatCurrency, moneyInputValue, toBaseMoney } from '../data/currency';
@@ -39,9 +39,29 @@ export function printSupplierReturn(record) {
  popup.document.close(); popup.focus(); popup.print(); return true;
 }
 export function SupplierReturnPrompt({ record, close }) {
- const [seconds,setSeconds] = useState(5);
- useEffect(()=>{if(!record)return;setSeconds(5);const interval=setInterval(()=>setSeconds(value=>Math.max(0,value-1)),1000);const timeout=setTimeout(close,5000);return()=>{clearInterval(interval);clearTimeout(timeout);};},[record,close]);
- return <Modal contentOnly open={!!record} onClose={close} title="Chekni chiqarish" icon={RotateCcw}><p className="text-sm">{tx('Chek ta’minotchi tarixida saqlandi.')} {seconds} {tx('soniyadan keyin oyna yopiladi.')}</p><button className="btn-primary mt-4" onClick={()=>{if(printSupplierReturn(record))close();}}>{tx('Chekni chiqarish')}</button></Modal>;
+ const [seconds,setSeconds] = useState(3);
+ const closeRef = useRef(close);
+ const recordId = record?.id;
+ useEffect(()=>{closeRef.current=close;},[close]);
+ useEffect(()=>{
+  if(recordId == null)return;
+  let remaining=3;
+  setSeconds(remaining);
+  const interval=window.setInterval(()=>{
+   remaining-=1;
+   if(remaining<=0){window.clearInterval(interval);closeRef.current();return;}
+   setSeconds(remaining);
+  },1000);
+  return()=>window.clearInterval(interval);
+ },[recordId]);
+ return <Modal contentOnly open={!!record} onClose={close} title="Chekni chiqarish" icon={RotateCcw} width={480}>
+  <p className="text-sm supplier-return-prompt-message">{tx('Chek ta’minotchi tarixida saqlandi.')}</p>
+  <div className="supplier-return-prompt-actions">
+   <button className="btn-primary supplier-return-prompt-button" onClick={()=>{if(printSupplierReturn(record))close();}}>
+    <Printer size={15}/><span>{tx('Chekni chiqarish')}</span><span className="supplier-return-prompt-countdown">{seconds}s</span>
+   </button>
+  </div>
+ </Modal>;
 }
 function SupplierReturnReceiptModal({ record, onClose }) {
  if (!record) return null;
@@ -76,7 +96,9 @@ function SupplierReturnReceiptModal({ record, onClose }) {
   <div className="supplier-return-receipt-actions"><button className="btn-ghost" onClick={onClose}>{tx('Yopish')}</button><button className="btn-primary" onClick={()=>{if(printSupplierReturn(record))onClose();}}><Printer size={15}/>{tx('Chekni chiqarish')}</button></div>
  </Modal>;
 }
-function SupplierReturnDetailsModal({ record, onClose }) {
+function SupplierReturnDetailsModal({ record, onClose, onReceivePayment }) {
+ const [paymentInput,setPaymentInput]=useState('0');
+ useEffect(()=>{setPaymentInput('0');},[record?.id]);
  if (!record) return null;
  const unit=record.measurementUnit||'dona';
  const modern=record.version===2;
@@ -106,6 +128,13 @@ function SupplierReturnDetailsModal({ record, onClose }) {
    <div className="supplier-return-detail-amounts">{amounts.map(([label,value],index)=><div className={index===0?'is-total':''} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
    <div className="supplier-return-detail-item supplier-return-detail-status"><span>{tx('Holat')}</span><strong>{tx(status)}</strong></div>
    <div className="supplier-return-detail-reason"><span>{tx('Qaytarish sababi')}</span><p>{record.reason||'—'}</p></div>
+   {modern&&onReceivePayment&&returnReceivable(record)>0&&<div className="supplier-return-debt-payment">
+    <h4>{tx('Qarzni to‘lash')}</h4>
+    <label htmlFor="supplier-return-debt-payment-amount">{tx('To‘lanadigan summa')}</label>
+    <div className="supplier-return-debt-payment-input"><input id="supplier-return-debt-payment-amount" className="input-base" type="text" inputMode="numeric" value={paymentInput===''?'':moneyInputValue(paymentInput,true)} onChange={event=>setPaymentInput(event.target.value===''?'':String(Math.min(returnReceivable(record),toBaseMoney(event.target.value))))} placeholder="0"/><span>{tx("so'm")}</span></div>
+    <div className="supplier-return-debt-payment-summary"><div><span>{tx('Jami qarz')}</span><strong>{money(returnReceivable(record))}</strong></div><div><span>{tx('To‘lovdan keyin qoladigan qarz')}</span><strong>{money(Math.max(0,returnReceivable(record)-toBaseMoney(paymentInput)))}</strong></div></div>
+    <button type="button" className="btn-primary supplier-return-debt-payment-submit" disabled={toBaseMoney(paymentInput)<=0} onClick={()=>{const updated=onReceivePayment(record,toBaseMoney(paymentInput));if(updated)setPaymentInput('0');}}>{tx('To‘lovni qabul qilish')}</button>
+   </div>}
    <div className="supplier-return-receipt-actions"><button className="btn-ghost" onClick={onClose}>{tx('Yopish')}</button>{modern&&<button className="btn-primary" onClick={()=>printSupplierReturn(record)}><Printer size={14}/>{tx('Chek')}</button>}</div>
   </div>
  </Modal>;
@@ -119,23 +148,23 @@ export function SupplierReturnForm({ draft, setDraft, confirming, setConfirming,
   ? `Yaroqli mahsulotdan ${formatQuantityInput(draft.goodMax)} ${tx(draft.unit)} qaytarish mumkin. Kiritilgan miqdorni kamaytiring.`
   : totals.defectiveQuantity > draft.badMax
    ? `Brak mahsulotdan ${formatQuantityInput(draft.badMax)} ${tx(draft.unit)} qaytarish mumkin. Kiritilgan miqdorni kamaytiring.`
-   : totals.refundedAmount > totals.refundDue
-    ? `Ta’minotchidan qaytgan pul ${money(totals.refundDue)} dan oshmasligi kerak.`
+   : totals.refundedAmount > totals.amount
+    ? `Ta’minotchidan qaytgan pul ${money(totals.amount)} dan oshmasligi kerak.`
     : totals.goodQuantity + totals.defectiveQuantity <= 0
      ? 'Yaroqli yoki brak mahsulot miqdorini kiriting.'
      : '';
  return <Modal contentOnly open onClose={close} title={confirming?'Qaytarishni tasdiqlash':'Tovarni qaytarish'} subtitle={draft.product.name} icon={RotateCcw} width={620}><div className="supplier-return-form">
  <p className="text-xs">{tx('Qabul sanasi')}: {returnDate(draft.receivedAt)}</p>
- <div className="supplier-return-grid">{[['Yaroqli','goodQuantity',draft.goodMax,draft.goodCost,draft.goodReceived,draft.goodReserved],['Brak','defectiveQuantity',draft.badMax,draft.badCost,draft.defectiveReceived,draft.defectiveReserved]].map(([label,key,max,cost,available,reserved])=><div className="supplier-return-box" key={key}><b>{tx(label)}</b><p>{tx('Hozir omborda')}: {formatQuantityInput(available)} {tx(draft.unit)}</p><p>{tx('Band qilingan')}: {formatQuantityInput(reserved)} {tx(draft.unit)}</p><p>{tx('Qaytarish mumkin')}: {formatQuantityInput(max)} {tx(draft.unit)}</p><p>{tx('Qabuldagi tan narxi')}: {money(cost)}</p><Field label={tx('Qaytariladigan miqdor')}><input className="input-base" type="text" inputMode={['dona','ta'].includes(draft.unit)?'numeric':'decimal'} disabled={confirming || Number(max)<=0} value={formatQuantityInput(draft[key])} onChange={e=>update(key,capQuantityInput(e.target.value,max,draft.unit))}/></Field><strong>{money(Number(draft[key]||0)*cost)}</strong></div>)}</div>
+ <div className="supplier-return-grid">{[['Yaroqli','goodQuantity',draft.goodMax,draft.goodCost,draft.goodReceived,draft.goodReserved],['Brak','defectiveQuantity',draft.badMax,draft.badCost,draft.defectiveReceived,draft.defectiveReserved]].map(([label,key,max,cost,available,reserved])=><div className="supplier-return-box" key={key}><b>{tx(label)}</b><p>{tx('Hozir omborda')}: {formatQuantityInput(available)} {tx(draft.unit)}</p><p>{tx('Band qilingan')}: {formatQuantityInput(reserved)} {tx(draft.unit)}</p><p>{tx('Qaytarish mumkin')}: {formatQuantityInput(max)} {tx(draft.unit)}</p><p>{tx('Qabuldagi tan narxi')}: {money(cost)}</p><Field label={tx('Qaytariladigan miqdor')}><input className="input-base" type="text" placeholder="0" inputMode={['dona','ta'].includes(draft.unit)?'numeric':'decimal'} disabled={confirming || Number(max)<=0} value={formatQuantityInput(draft[key])} onChange={e=>update(key,capQuantityInput(e.target.value,max,draft.unit))}/></Field><strong>{money(Number(draft[key]||0)*cost)}</strong></div>)}</div>
  <Field label={tx('Qaytarish sababi')}><textarea className="input-base" rows={2} disabled={confirming} value={draft.reason} onChange={e=>update('reason',e.target.value)}/></Field>
  <dl className="supplier-return-totals">{[['Umumiy summa',totals.amount],['Bizning qarzimizdan ayiriladi',totals.debtOffset],['Qaytarish summasi (jami)',totals.refundDue],['Ta’minotchi qaytarishi kerak',totals.supplierOwes]].map(([label,value])=><div key={label}><dt>{tx(label)}</dt><dd>{money(value)}</dd></div>)}</dl>
- <Field label={tx('Ta’minotchidan hozir qaytgan pul')}><input className="input-base" inputMode="decimal" disabled={confirming} value={moneyInputValue(draft.refundedAmount)} onChange={e=>update('refundedAmount',String(toBaseMoney(e.target.value)))}/></Field>
+ <Field label={tx('Ta’minotchidan hozir qaytgan pul')}><div className="relative"><input placeholder="0" className="input-base pr-14" inputMode="decimal" disabled={confirming} value={moneyInputValue(draft.refundedAmount)} onChange={e=>update('refundedAmount',String(toBaseMoney(e.target.value)))}/><span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm" style={{color:'var(--text-muted)'}}>{tx("so'm")}</span></div></Field>
  {draft.error && <p role="alert" style={{color:'var(--danger)'}}>{tx(draft.error)}</p>}
  {!totals.valid && <p className="text-xs" role="status" style={{color:limitMessage?'var(--danger)':'var(--text-muted)'}}>{tx(limitMessage || 'Miqdor va sababni kiriting. Qaytgan pul qaytarilishi kerak bo‘lgan summadan oshmasin.')}</p>}
  <div className="flex justify-end gap-2"><button className="btn-ghost" onClick={confirming?()=>setConfirming(false):close}>{tx(confirming?'Orqaga':'Bekor qilish')}</button><button className="btn-primary" disabled={!totals.valid} onClick={confirming?confirm:()=>setConfirming(true)}>{tx(confirming?'Tasdiqlash va qaytarish':'Davom etish')}</button></div>
  </div></Modal>;
 }
-export default function SupplierReturnsLedger({ records, showDashboard = false }) {
+export default function SupplierReturnsLedger({ records, showDashboard = false, onReceivePayment }) {
  useLanguage();
  const [selected,setSelected]=useState(null);
  const [receiptRecord,setReceiptRecord]=useState(null);
@@ -175,10 +204,10 @@ export default function SupplierReturnsLedger({ records, showDashboard = false }
  <div className="supplier-return-scroll"><table><thead><tr>{['Ta’minotchi / mahsulot','Sana va vaqt','Qaytarilgan miqdor','Sabab','Qaytarish summasi','Qaytgan pul','Bizga qarzi','Holat','Chek'].map(label=><th key={label}>{tx(label)}</th>)}</tr></thead><tbody>{filteredRecords.map(r=>{
   const receivable=returnReceivable(r);
   const status=r.version!==2?'Eski yozuv':Number(r.refundDue||0)<=0?'Qarzdan ayrildi':receivable<=0?'To‘liq qaytardi':Number(r.refundedAmount||0)>0?'Qisman qaytardi':'Pul kutilmoqda';
-  return <tr key={r.id} className="supplier-return-clickable-row" tabIndex={0} aria-label={`${tx('Tafsilotlarni ko‘rish')}: ${r.supplierName||''} ${r.productName||''}`} onClick={()=>setSelected(r)} onKeyDown={event=>{if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();setSelected(r);}}}><td><div className="supplier-return-row-product"><strong>{r.supplierName||'—'}</strong><br/>{r.productName}<small>{String(r.id||'').slice(0,18)}</small></div></td><td>{returnDate(r.returnedAt)}</td><td>{r.version===2?<><div>{tx('Yaroqli')}: {Number(r.goodQuantity||0).toLocaleString('uz-UZ')} {tx(r.measurementUnit||'dona')}</div><div className="supplier-return-defective">{tx('Brak')}: {Number(r.defectiveQuantity||0).toLocaleString('uz-UZ')} {tx(r.measurementUnit||'dona')}</div></>:`${Number(r.items||0).toLocaleString('uz-UZ')} ${tx(r.measurementUnit||'dona')}`}</td><td className="supplier-return-reason-cell" title={r.reason||''}>{r.reason||'—'}</td><td>{money(r.amount)}</td><td>{r.version===2?money(r.refundedAmount):'—'}</td><td>{r.version===2?money(receivable):'—'}</td><td><span className={`supplier-return-status ${status==='To‘liq qaytardi'||status==='Qarzdan ayrildi'?'is-complete':status==='Qisman qaytardi'?'is-partial':'is-pending'}`}>{tx(status)}</span></td><td>{r.version===2?<button className="btn-primary supplier-return-check-button" onClick={event=>{event.stopPropagation();setReceiptRecord(r);}} aria-haspopup="dialog" title={tx('Chekni chiqarish')}><Printer size={13}/>{tx('Chek')}</button>:<span>{tx('Eski yozuv')}</span>}</td></tr>;
+  return <tr key={r.id} className="supplier-return-clickable-row" tabIndex={0} aria-label={`${tx('Tafsilotlarni ko‘rish')}: ${r.supplierName||''} ${r.productName||''}`} onClick={()=>setSelected(r)} onKeyDown={event=>{if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();setSelected(r);}}}><td><div className="supplier-return-row-product"><strong>{r.supplierName||'—'}</strong><br/>{r.productName}<small>{String(r.id||'').slice(0,18)}</small></div></td><td>{returnDate(r.returnedAt)}</td><td>{r.version===2?<><div>{tx('Yaroqli')}: {Number(r.goodQuantity||0).toLocaleString('uz-UZ')} {tx(r.measurementUnit||'dona')}</div><div className="supplier-return-defective">{tx('Brak')}: {Number(r.defectiveQuantity||0).toLocaleString('uz-UZ')} {tx(r.measurementUnit||'dona')}</div></>:`${Number(r.items||0).toLocaleString('uz-UZ')} ${tx(r.measurementUnit||'dona')}`}</td><td className="supplier-return-reason-cell" title={r.reason||''}>{r.reason||'—'}</td><td>{money(r.amount)}</td><td>{r.version===2?money(r.refundedAmount):'—'}</td><td className="supplier-return-debt-amount">{r.version===2?money(receivable):'—'}</td><td><span className={`supplier-return-status ${status==='To‘liq qaytardi'||status==='Qarzdan ayrildi'?'is-complete':status==='Qisman qaytardi'?'is-partial':'is-pending'}`}>{tx(status)}</span></td><td>{r.version===2?<button className="btn-primary supplier-return-check-button" onClick={event=>{event.stopPropagation();setReceiptRecord(r);}} aria-haspopup="dialog" title={tx('Chekni chiqarish')}><Printer size={13}/>{tx('Chek')}</button>:<span>{tx('Eski yozuv')}</span>}</td></tr>;
  })}{!filteredRecords.length&&<tr><td colSpan={9} className="supplier-return-empty">{tx('Qaytarilgan tovarlar topilmadi.')}</td></tr>}</tbody></table></div>
  {showDashboard&&<div className="supplier-return-result-count">{filteredRecords.length} {tx('ta natija')}</div>}
- <SupplierReturnDetailsModal record={selected} onClose={()=>setSelected(null)}/>
+ <SupplierReturnDetailsModal record={selected} onClose={()=>setSelected(null)} onReceivePayment={onReceivePayment?((record,value)=>{const updated=onReceivePayment(record,value);if(updated)setSelected(updated);return updated;}):undefined}/>
  <SupplierReturnReceiptModal record={receiptRecord} onClose={()=>setReceiptRecord(null)}/>
  </section></div>;
 }

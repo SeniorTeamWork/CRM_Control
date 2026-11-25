@@ -1,6 +1,7 @@
 import { readPosSales, readDebtPayments, withDebtBalance } from "./debtPayments";
 import { readStockProducts, stockAlerts } from "./stockStore";
 import { readFinanceOperations } from "./financeStore";
+import { readOrders } from "./ordersStore";
 import { getData } from "../supabase/db";
 
 const sum = (rows, field) => rows.reduce((total, row) => total + Number(row?.[field] || 0), 0);
@@ -20,7 +21,8 @@ export function buildBusinessSnapshot() {
   const returns = readList("crm_returns");
   const customers = readList("crm_customers");
   const { incomes, expenses } = readFinanceOperations();
-  const income = sum(incomes, "amount");
+  const reservedAdvances = readOrders().filter((order) => order.status === "reserved").reduce((total, order) => total + Number(order.advancePayment || 0), 0);
+  const income = sum(incomes, "amount") + reservedAdvances;
   const expense = sum(expenses, "amount");
   const approvedReturns = returns.filter((item) => item.status === "approved");
   const returnedBySale = approvedReturns.reduce((totals, item) => {

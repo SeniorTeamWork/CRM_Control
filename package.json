@@ -2,7 +2,6 @@
   "name": "premium-web-crm-ui",
   "version": "1.0.0",
   "private": true,
-  "proxy": "http://localhost:8787",
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
     "imask": "^7.6.1",

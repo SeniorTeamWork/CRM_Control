@@ -78,13 +78,15 @@ export const buildNavItems = (t) => [
 
   {
     id: "orders",
-    label: "Buyurtmalar",
+    label: "Band qilinganlar",
     icon: ClipboardList,
   },
 
+  { id: "drafts", label: "Qoralama", icon: FilePenLine },
+
   {
     id: "pending-pickups",
-    label: "Kutishdagi tovarlar",
+    label: "Yetkazib berish",
     icon: CalendarClock,
   },
 
@@ -182,7 +184,6 @@ export const buildNavItems = (t) => [
     label: "AI Chat",
     icon: MessageCircle,
   },
-  { id: "drafts", label: "Qoralama", icon: FilePenLine },
 
   {
     id: "settings",

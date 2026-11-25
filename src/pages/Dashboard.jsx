@@ -275,7 +275,7 @@ export default function Dashboard({
   };
 
   return (
-    <div className="space-y-6 fade-in">
+    <div className="dashboard-page space-y-6 fade-in">
 
       {/* =================================================
           HEADER
@@ -428,7 +428,7 @@ export default function Dashboard({
           CHART + TOP PRODUCTS
       ================================================= */}
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="dashboard-layout-grid grid grid-cols-3 gap-4">
 
         {/* =================================================
             SOTUV KO'RSATKICHLARI
@@ -547,7 +547,7 @@ export default function Dashboard({
                   top: 15,
                   right: 10,
                   bottom: 5,
-                  left: 0,
+                  left: 4,
                 }}
               >
 
@@ -625,7 +625,7 @@ export default function Dashboard({
                   }}
                   axisLine={false}
                   tickLine={false}
-                  width={70}
+                  width={90}
                   domain={[
                     0,
                     "auto",
@@ -944,7 +944,7 @@ export default function Dashboard({
           RECENT SALES + STOCK
       ================================================= */}
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="dashboard-layout-grid grid grid-cols-3 gap-4">
 
         {/* RECENT SALES */}
 

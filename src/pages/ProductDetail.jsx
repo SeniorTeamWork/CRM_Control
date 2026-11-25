@@ -1,7 +1,7 @@
 import { translateText as tx } from "../locales/translateText";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import './ProductDetail.css';
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Edit2,
@@ -11,11 +11,14 @@ import {
   ShoppingCart,
   ArrowUpCircle,
   ArrowDownCircle,
+  RotateCcw,
   // Copy,
   // Pointer,
 } from "lucide-react";  
-import { products,  } from "../data/mockData";
 import Modal, { Field } from "../components/Modal";
+import { SupplierReturnForm, SupplierReturnPrompt } from "../components/SupplierReturns";
+import { calculateReturn, returnLimits, reduceReturnStock, supplierOutstanding, allocateReturnDebt } from "../data/supplierReturns";
+import { reservedQuantitiesByCondition } from "../data/ordersStore";
 import { useToast } from "../context/ToastContext";
 import {
   ResponsiveContainer,
@@ -27,7 +30,7 @@ import {
 // import { useToast } from "../context/ToastContext";
 import { useLanguage } from "../context/LanguageContext";
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
-import { getData } from "../supabase/db";
+import { getData, setData } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 const readList = (key) => {
   try { const value = getData(key, []); return Array.isArray(value) ? value : []; } catch { return []; }
@@ -43,12 +46,12 @@ const saleQuantity = (sale, productId) => Array.isArray(sale.items)
 const saleAmount = (sale, productId) => saleItems(sale, productId).reduce((sum, item) => sum + Number(item.total ?? Number(item.qty || 0) * Number(item.price || 0)), 0);
 const receiptQuantity = (receipt, productId) => (receipt.products || []).filter((item) => String(item.id) === String(productId)).reduce((sum, item) => sum + Number(item.quantity ?? item.stock ?? 0), 0);
 const findProduct = (productId) => {
-  let list = products;
+  let list = [];
   try {
-    const saved = getProducts(null);
+    const saved = getProducts([]);
     if (Array.isArray(saved)) list = saved;
-  } catch { /* Use the catalog when storage is unavailable. */ }
-  return list.find((item) => String(item.id) === String(productId)) || products[0];
+  } catch { /* Empty catalog when Supabase data is unavailable. */ }
+  return list.find((item) => String(item.id) === String(productId)) || null;
 };
 const EmptyData = ({ icon: Icon, text }) => <div className="py-10 text-center"><Icon size={24} className="mx-auto mb-2" style={{ color: "var(--text-faint)" }}/><p className="text-sm" style={{ color: "var(--text-muted)" }}>{tx(text)}</p></div>;
 
@@ -65,9 +68,23 @@ export default function ProductDetail({ productId, onBack }) {
   }, [productId]);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({});
+  const [returnDraft, setReturnDraft] = useState(null);
+  const [returnConfirming, setReturnConfirming] = useState(false);
+  const [returnReceipt, setReturnReceipt] = useState(null);
+  const returnSaving = useRef(false);
   const { success, error } = useToast();
   const { t } = useLanguage();
   const [tab, setTab] = useState("overview");
+  if (!product) {
+    return (
+      <div className="space-y-6 fade-in">
+        <button type="button" onClick={onBack} className="app-back-button" aria-label={tx("Oldingi sahifaga qaytish")}>
+          <ArrowLeft size={16} aria-hidden="true" style={{ flexShrink: 0 }} />{tx("Orqaga")}
+        </button>
+        <div className="card p-6"><EmptyData icon={Package} text="Mahsulot topilmadi" /></div>
+      </div>
+    );
+  }
   const statusMap = {
     active: {
       label: t("productDetail.status.active", "Faol"),
@@ -89,6 +106,14 @@ export default function ProductDetail({ productId, onBack }) {
   const margin = product.price > 0
     ? Math.round(((product.price - product.cost) / product.price) * 100)
     : 0;
+  const costPrice = Number(product.cost || 0);
+  const sellPrice = Number(product.price || 0);
+  const unitProfit = sellPrice - costPrice;
+  const profitPercent = costPrice > 0 ? (unitProfit / costPrice) * 100 : null;
+  const profitPercentLabel = profitPercent === null
+    ? "—"
+    : `${new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 2 }).format(profitPercent)}%`;
+  const profitColor = profitPercent === null ? "var(--text-muted)" : unitProfit < 0 ? "var(--danger)" : "var(--success)";
   const now = new Date(), sales = readList("crm_sales"), receipts = readList("crm_supplier_receipts"), customerReturns = readList("crm_returns"), supplierReturns = readList("crm_supplier_returns");
   const productCustomerReturns = customerReturns.filter((item) => item.status === "approved" && String(item.productId) === String(product.id));
   const productSales = sales.map((sale) => {
@@ -105,18 +130,162 @@ export default function ProductDetail({ productId, onBack }) {
   const productReceipts = receipts.map((receipt) => ({ receipt, date: parsedDate(receipt.date), qty: receiptQuantity(receipt, product.id) }));
   const soldToday = productSales.filter(({ date }) => sameDay(date, now)).reduce((sum, item) => sum + item.qty, 0);
   const soldTotal = productSales.reduce((sum, item) => sum + item.qty, 0);
-  const receivedToday = receipts.filter((receipt) => sameDay(parsedDate(receipt.date), now)).reduce((sum, receipt) => sum + receiptQuantity(receipt, product.id), 0);
   const receivedThisMonth = productReceipts.filter(({ date }) => date && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()).reduce((sum, item) => sum + item.qty, 0);
   const minimumStock = Number(product.minStock ?? product.minStockLevel ?? product.minQuantity ?? 0);
   const vatRate = Number(product.vat ?? product.vatRate ?? 0);
   const productSupplierReturns = supplierReturns.filter((item) => String(item.productId) === String(product.id));
+  const defectiveStock = Math.min(Math.max(0, Number(product.stock || 0)), Math.max(0, Number(product.defectiveStock ?? product.defects?.reduce((sum, defect) => sum + Number(defect.quantity || 0), 0) ?? 0)));
+  const defectEntries = Array.isArray(product.defects) ? product.defects.filter((defect) => Number(defect.quantity) > 0) : [];
+  const recordedDefectQuantity = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0), 0);
+  const unrecordedDefectQuantity = Math.max(0, defectiveStock - recordedDefectQuantity);
+  const defectCostTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.unitPrice ?? defect.price ?? product.defectUnitPrice ?? product.cost ?? 0), 0)
+    + unrecordedDefectQuantity * Number(product.defectUnitPrice ?? product.cost ?? 0);
+  const defectSellTotal = defectEntries.reduce((sum, defect) => sum + Number(defect.quantity || 0) * Number(defect.salePrice ?? defect.sellingPrice ?? product.defectSalePrice ?? product.defectPrice ?? defect.unitPrice ?? defect.price ?? product.price ?? product.cost ?? 0), 0)
+    + unrecordedDefectQuantity * Number(product.defectSalePrice ?? product.defectPrice ?? product.price ?? product.cost ?? 0);
+  const defectCostPrice = defectiveStock > 0
+    ? defectCostTotal / defectiveStock
+    : Number(product.defectUnitPrice ?? 0);
+  const defectSellPrice = defectiveStock > 0
+    ? defectSellTotal / defectiveStock
+    : Number(product.defectSalePrice ?? product.defectPrice ?? 0);
   const money = (value) => formatCurrency(value);
   const dateLabel = (value) => parsedDate(value)?.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short", year: "numeric" }) || "—";
+  const startProductReturn = () => {
+    const matchingReceipt = receipts
+      .filter((receipt) => (receipt.products || []).some((line) => String(line.id) === String(product.id)))
+      .sort((left, right) => (parsedDate(right.date)?.getTime() || 0) - (parsedDate(left.date)?.getTime() || 0))[0];
+    const supplierId = product.supplierId ?? matchingReceipt?.supplierId;
+    const supplier = readList("crm_suppliers").find((item) => String(item.id) === String(supplierId)) || null;
+    if (!supplier || supplierId == null) {
+      error("Ta’minotchi topilmadi", "Mahsulot uchun ta’minotchi ma’lumotini tekshiring.");
+      return;
+    }
+    const orders = readList(`crm_supplier_orders_${supplierId}`);
+    const matchingOrder = (matchingReceipt?.orderId != null
+      ? orders.find((order) => String(order.id) === String(matchingReceipt.orderId))
+      : null) || [...orders].sort((left, right) => (parsedDate(right.date)?.getTime() || 0) - (parsedDate(left.date)?.getTime() || 0)).find((order) => (order.productDetails || order.products || []).some((line) => String(line.id) === String(product.id)));
+    if (!matchingOrder) {
+      error("Qabul hujjati topilmadi", "Mahsulotga tegishli ta’minotchi qabul hujjati topilmadi.");
+      return;
+    }
+    const receiptLine = (matchingReceipt?.products || []).find((line) => String(line.id) === String(product.id));
+    const line = (matchingOrder.productDetails || matchingOrder.products || []).find((item) => String(item.id) === String(product.id)) || receiptLine || {
+      id: product.id,
+      name: product.name,
+      quantity: product.stock,
+      cost: product.cost,
+      measurementUnit: product.measurementUnit,
+      measurementType: product.measurementType,
+    };
+    const currentReturns = readList("crm_supplier_returns").filter((record) => String(record.supplierId) === String(supplierId));
+    const reserved = reservedQuantitiesByCondition();
+    const productId = String(product.id);
+    const limits = returnLimits(line, product, currentReturns, matchingOrder.id, {
+      good: reserved.good[productId] || 0,
+      defective: reserved.defective[productId] || 0,
+    });
+    const unit = line.measurementUnit || product.measurementUnit || (line.measurementType === "weight" || product.measurementType === "weight" ? "kg" : "dona");
+    setReturnDraft({
+      product,
+      line,
+      ...limits,
+      supplierId,
+      supplierName: supplier.name,
+      orderId: matchingOrder.id,
+      orderDebt: supplierOutstanding(supplier, orders, currentReturns).total,
+      receivedAt: matchingReceipt?.date || matchingOrder.date,
+      unit,
+      goodQuantity: "",
+      defectiveQuantity: "",
+      refundedAmount: "",
+      reason: "",
+    });
+    returnSaving.current = false;
+    setReturnConfirming(false);
+  };
+  const confirmProductReturn = () => {
+    if (!returnDraft || returnSaving.current) return;
+    const catalog = getProducts([]);
+    const currentProduct = (Array.isArray(catalog) ? catalog : []).find((item) => String(item.id) === String(returnDraft.product.id));
+    const supplierId = returnDraft.supplierId;
+    const suppliers = readList("crm_suppliers");
+    const supplier = suppliers.find((item) => String(item.id) === String(supplierId));
+    const orders = readList(`crm_supplier_orders_${supplierId}`);
+    const order = orders.find((item) => String(item.id) === String(returnDraft.orderId));
+    const allReturns = readList("crm_supplier_returns");
+    const currentReturns = allReturns.filter((item) => String(item.supplierId) === String(supplierId));
+    if (!currentProduct || !supplier || !order) {
+      error("Qaytarish amalga oshmadi", "Mahsulot, ta’minotchi yoki qabul hujjati topilmadi.");
+      setReturnDraft(null);
+      return;
+    }
+    const reserved = reservedQuantitiesByCondition();
+    const productId = String(currentProduct.id);
+    const fresh = {
+      ...returnDraft,
+      ...returnLimits(returnDraft.line, currentProduct, currentReturns, order.id, {
+        good: reserved.good[productId] || 0,
+        defective: reserved.defective[productId] || 0,
+      }),
+      orderDebt: supplierOutstanding(supplier, orders, currentReturns).total,
+    };
+    const totals = calculateReturn(fresh);
+    if (!totals.valid || fresh.orderDebt !== returnDraft.orderDebt) {
+      setReturnDraft({ ...fresh, error: "Ombor qoldig‘i, band qilingan miqdor yoki qarz o‘zgardi. Miqdor va pulni qayta tekshiring." });
+      setReturnConfirming(false);
+      return;
+    }
+    returnSaving.current = true;
+    const record = {
+      version: 2,
+      id: crypto.randomUUID(),
+      supplierId,
+      supplierName: supplier.name,
+      orderId: order.id,
+      productId: currentProduct.id,
+      productName: currentProduct.name,
+      productCategory: currentProduct.categoryName || currentProduct.category || currentProduct.categoryTitle || "",
+      productCount: 1,
+      reason: fresh.reason.trim(),
+      items: totals.goodQuantity + totals.defectiveQuantity,
+      measurementUnit: fresh.unit,
+      goodQuantity: totals.goodQuantity,
+      defectiveQuantity: totals.defectiveQuantity,
+      goodUnitCost: fresh.goodCost,
+      defectUnitCost: fresh.badCost,
+      amount: totals.amount,
+      debtOffset: totals.debtOffset,
+      refundDue: totals.refundDue,
+      refundedAmount: totals.refundedAmount,
+      receivedAt: fresh.receivedAt,
+      returnedAt: new Date().toISOString(),
+    };
+    Object.assign(record, allocateReturnDebt(totals.debtOffset, supplier, orders, currentReturns, order.id));
+    try {
+      const balances = supplierOutstanding(supplier, orders, currentReturns);
+      const nextSupplier = {
+        ...supplier,
+        debt: Math.max(0, fresh.orderDebt - totals.debtOffset),
+        legacyDebt: Math.max(0, balances.legacy - record.legacyOffset),
+      };
+      saveProducts(catalog.map((item) => String(item.id) === String(currentProduct.id) ? reduceReturnStock(item, record, fresh.defectIds) : item));
+      setData("crm_suppliers", suppliers.map((item) => String(item.id) === String(supplierId) ? nextSupplier : item));
+      setData("crm_supplier_returns", [record, ...allReturns]);
+      setReturnDraft(null);
+      setReturnConfirming(false);
+      setReturnReceipt(record);
+      success("Tovar qaytarildi", currentProduct.name);
+    } catch (cause) {
+      returnSaving.current = false;
+      setReturnDraft({ ...fresh, error: cause.message || "Saqlash amalga oshmadi" });
+      setReturnConfirming(false);
+    }
+  };
   const historyEvents = [
     ...productReceipts.filter((item) => item.qty > 0).map((item) => ({ ...item, type: "in", reason: "Ta'minotchidan qabul qilindi" })),
     ...productSales.filter((item) => item.qty > 0).map((item) => ({ ...item, type: "out", reason: "Sotuv" })),
     ...productCustomerReturns.map((item) => ({ date: parsedDate(item.date), qty: Number(item.quantity || 0), type: "in", reason: "Mijoz qaytarishi" })),
-    ...productSupplierReturns.map((item) => ({ date: parsedDate(item.returnedAt), qty: Number(item.items || 0), type: "out", reason: "Ta'minotchiga qaytarildi" })),
+    ...productSupplierReturns.map((item) => ({ date: parsedDate(item.returnedAt), qty: Number(item.items || 0), type: "out", reason: "Tovar ta'minotchiga qaytarildi" })),
   ].sort((left, right) => (right.date?.getTime() || 0) - (left.date?.getTime() || 0));
   const movements = historyEvents.slice(0, 8);
   const monthlySales = Array.from({ length: 6 }, (_, index) => {
@@ -177,8 +346,8 @@ export default function ProductDetail({ productId, onBack }) {
       stock: Number(editForm.stock),
     };
     try {
-      let list = products;
-      const saved = getProducts(null);
+      let list = [];
+      const saved = getProducts([]);
       if (Array.isArray(saved)) list = saved;
       saveProducts(list.map((item) => String(item.id) === String(product.id) ? updatedProduct : item));
       setProduct(updatedProduct);
@@ -191,8 +360,8 @@ export default function ProductDetail({ productId, onBack }) {
   const deleteProduct = () => {
     if (!window.confirm(`“${product.name}” mahsulotini o'chirmoqchimisiz?`)) return;
     try {
-      let list = products;
-      const saved = getProducts(null);
+      let list = [];
+      const saved = getProducts([]);
       if (Array.isArray(saved)) list = saved;
       saveProducts(list.filter((item) => String(item.id) !== String(product.id)));
       success("Mahsulot o'chirildi");
@@ -204,7 +373,8 @@ export default function ProductDetail({ productId, onBack }) {
   return (
     <div className="space-y-6 fade-in">
       {/* Header */}
-      <div>
+      <div className="pd-product-detail-header">
+        <div className="pd-product-detail-title">
         <button
           type="button"
           onClick={onBack}
@@ -236,6 +406,10 @@ export default function ProductDetail({ productId, onBack }) {
             </span>
           </div>
         </div>
+        </div>
+        <button type="button" className="pd-product-return-button" onClick={startProductReturn}>
+          <RotateCcw size={16} />{tx("Tovarni qaytarish")}
+        </button>
       </div>
 
       {/* Top section */}
@@ -319,24 +493,50 @@ export default function ProductDetail({ productId, onBack }) {
             <div
               className="flex items-center justify-between p-3 rounded-xl"
               style={{
-                background: "var(--success-light)",
+                background: "var(--danger-light)",
+              }}
+            >
+              <span className="text-sm" style={{ color: "var(--danger)" }}>
+                {tx("Brak sotuv narxi")}
+              </span>
+              <span className="font-semibold text-sm" style={{ color: "var(--danger)" }}>
+                {defectSellPrice > 0 || defectiveStock > 0 ? formatCurrency(defectSellPrice) : "—"}
+              </span>
+            </div>
+            <div
+              className="flex items-center justify-between p-3 rounded-xl"
+              style={{
+                background: "var(--danger-light)",
+              }}
+            >
+              <span className="text-sm" style={{ color: "var(--danger)" }}>
+                {tx("Brak tan narxi")}
+              </span>
+              <span className="font-semibold text-sm" style={{ color: "var(--danger)" }}>
+                {defectCostPrice > 0 || defectiveStock > 0 ? formatCurrency(defectCostPrice) : "—"}
+              </span>
+            </div>
+            <div
+              className="flex items-center justify-between p-3 rounded-xl"
+              style={{
+                background: unitProfit < 0 ? "var(--danger-light)" : profitPercent === null ? "var(--surface-2)" : "var(--success-light)",
               }}
             >
               <span
                 className="text-sm"
                 style={{
-                  color: "var(--success)",
+                  color: profitColor,
                 }}
               >
-                {tx(t("productDetail.margin", "Marja"))}
+                {tx("Foyda foizi")}
               </span>
               <span
                 className="font-bold text-sm"
                 style={{
-                  color: "var(--success)",
+                  color: profitColor,
                 }}
               >
-                {tx(margin)}%
+                {profitPercentLabel}
               </span>
             </div>
             <div className="flex gap-2 pt-1">
@@ -378,11 +578,11 @@ export default function ProductDetail({ productId, onBack }) {
                   : "var(--violet-light)",
             },
             {
-              icon: ArrowUpCircle,
-              label: "Bugun qabul qilingan",
-              value: `${receivedToday} ${t("productDetail.kpi.unit", "dona")}`,
-              color: "var(--warning)",
-              bg: "var(--warning-light)",
+              icon: Package,
+              label: "Braklar",
+              value: `${defectiveStock} ${t("productDetail.kpi.unit", "dona")}`,
+              color: "var(--danger)",
+              bg: "var(--danger-light)",
             },
           ].map((k) => (
             <div key={k.label} className="card p-4">
@@ -778,12 +978,14 @@ export default function ProductDetail({ productId, onBack }) {
             <Field label={tx("SKU kodi")}><input className="input-base" value={editForm.sku || ""} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} /></Field>
             <Field label={tx("Kategoriya")}><input className="input-base" value={editForm.category || ""} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} /></Field>
             <Field label={tx("Qoldiq")}><input type="number" min="0" className="input-base" value={editForm.stock ?? ""} onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })} /></Field>
-            <Field label={tx("Sotuv narxi")}><input type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.price, false)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /></Field>
-            <Field label={tx("Tan narxi")}><input type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.cost, false)} onChange={(e) => setEditForm({ ...editForm, cost: String(toBaseMoney(e.target.value)) })} /></Field>
+            <Field label={tx("Sotuv narxi")}><input placeholder="0" type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.price, false)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /></Field>
+            <Field label={tx("Tan narxi")}><input placeholder="0" type="number" min="0" step="any" className="input-base" value={moneyInputValue(editForm.cost, false)} onChange={(e) => setEditForm({ ...editForm, cost: String(toBaseMoney(e.target.value)) })} /></Field>
           </div>
           <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost cursor-pointer" onClick={() => setIsEditOpen(false)}>{tx("Bekor qilish")}</button><button type="button" className="btn-primary cursor-pointer" onClick={saveEdit}><Edit2 size={15} />{tx("Saqlash")}</button></div>
         </div>
       </Modal>
+      <SupplierReturnForm draft={returnDraft} setDraft={setReturnDraft} confirming={returnConfirming} setConfirming={setReturnConfirming} close={() => { setReturnDraft(null); setReturnConfirming(false); }} confirm={confirmProductReturn} />
+      <SupplierReturnPrompt record={returnReceipt} close={() => setReturnReceipt(null)} />
     </div>
   );
 }

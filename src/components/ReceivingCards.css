@@ -26,6 +26,9 @@
 .receiving-card-select select { width: 100%; min-height: 44px; padding: 10px; color: var(--text-primary); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
 .receiving-card-select select:focus-visible, .director-cards button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .receiving-card-preview { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding: 12px; background: var(--brand-light); border-radius: 8px; overflow-wrap: anywhere; }
+.receiving-card-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.receiving-card-preview-heading strong { min-width: 0; }
+.receiving-card-preview-heading small { flex: 0 0 auto; padding: 3px 7px; border-radius: 6px; background: var(--surface); }
 .receiving-card-preview strong { color: var(--brand); font-size: 15px; font-variant-numeric: tabular-nums; }
 .receiving-card-preview span, .receiving-card-preview small { color: var(--text-secondary); font-size: 12px; }
 .receiving-card-select > p { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }

@@ -16,9 +16,11 @@ import { useToast } from "../context/ToastContext";
 import DateRangeFilter, { matchesDateRange } from "../components/DateRangeFilter";
 
 import { formatCurrency } from "../data/currency";
+import { uniqueProductCount } from "../data/productCounts";
+import { readPosSales } from "../data/debtPayments";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
 import { getCustomers, saveCustomers } from "../supabase/bolimlar/mijozlar";
-import { getReturns, getSales, saveReturns, saveSales } from "../supabase/bolimlar/sotuvlar";
+import { ADDITIONAL_SALES_KEY, SALES_KEY, getReturns, getSales, saveReturns, saveSales } from "../supabase/bolimlar/sotuvlar";
 const reasonOptions = [
   "Nosoz / ishlamaydi",
   "Sifat muammosi",
@@ -73,7 +75,7 @@ export default function Returns() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const [salesForReturn] = useState(() => { try { const value = getSales(); return Array.isArray(value) ? value : []; } catch { return []; } });
+  const [salesForReturn] = useState(() => readPosSales());
   const [productsForReturn] = useState(() => { try { const value = getProducts(); return Array.isArray(value) ? value : []; } catch { return []; } });
   const [returnLookup, setReturnLookup] = useState("");
   const [selectedSale, setSelectedSale] = useState(null);
@@ -110,10 +112,13 @@ export default function Returns() {
     return (matchesText || r.lines.some(line => [line.id, line.productId, line.product].some(value => normalizeProductText(value).startsWith(query)))) && saleMatchesProduct({ items: r.lines.map(line => ({ id: line.productId, name: line.product, category: line.category })) }, productsForReturn, categoryFilter) && matchesDateRange(day, dateFrom, dateTo);
   });
 
-  const saleNumbers = documentNumbers(salesForReturn, "sales");
+  const saleNumbers = salesForReturn.reduce((numbers, sale) => {
+    const type = sale.sourceSalesKey === ADDITIONAL_SALES_KEY ? "additional-pos" : "sales";
+    return { ...numbers, ...documentNumbers([sale], type) };
+  }, {});
   const returnNumbers = documentNumbers(returnsList, "returns");
   const lookupQuery = normalizeText(returnLookup);
-  const saleSuggestions = lookupQuery ? salesForReturn.filter((sale) => [sale.customer, sale.customerName, sale.customerPhone, saleNumbers[String(sale.id)], sale.id, sale.saleId, sale.receiptNumber, sale.checkNumber].some((value) => normalizeText(value).includes(lookupQuery)))
+  const saleSuggestions = lookupQuery ? salesForReturn.filter((sale) => [sale.customer, sale.customerName, sale.customerPhone, saleNumbers[String(sale.id)], sale.id, sale.saleId].some((value) => normalizeText(value).includes(lookupQuery)))
     .sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0)) : [];
   const customerKey = sale => sale.customerId != null ? "id:" + sale.customerId : normalizeText(sale.customer || sale.customerName || "Mijoz") + "|" + normalizeText(sale.customerPhone);
   const customerChoices = [...new Map(saleSuggestions.map(sale => [customerKey(sale), sale])).values()];
@@ -123,7 +128,7 @@ export default function Returns() {
   const returnLines = (selectedSale?.items || []).map((item, index) => {
     const itemId = String(item.id ?? "");
     const saleId = String(selectedSale.id ?? selectedSale.receiptNumber ?? "");
-    const returnedQty = returnsList.filter((entry) => entry.status !== "rejected" && String(entry.saleId) === saleId && (itemId ? String(entry.productId ?? "") === itemId : normalizeText(entry.product) === normalizeText(item.name))).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+    const returnedQty = returnsList.filter((entry) => entry.status !== "rejected" && String(entry.saleId) === saleId && (!entry.sourceSalesKey || entry.sourceSalesKey === selectedSale.sourceSalesKey) && (itemId ? String(entry.productId ?? "") === itemId : normalizeText(entry.product) === normalizeText(item.name))).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
     const available = Math.max(0, Number(item.qty ?? item.quantity ?? 0) - returnedQty);
     const product = productsForReturn.find((entry) => String(entry.id) === itemId);
     const itemQuantity = Number(item.qty ?? item.quantity ?? 0);
@@ -139,6 +144,7 @@ export default function Returns() {
     return { item, index, key, available, returnedQuantity: returnedQty, unitPrice, ...quantities, quantity: quantities.goodQuantity + quantities.defectiveQuantity };
   });
   const selectedLines = returnLines.filter((line) => line.quantity > 0);
+  const selectedProductCount = uniqueProductCount(selectedLines.map((line) => line.item));
   const returnTotal = selectedLines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const selectedSaleTotal = saleTotal(selectedSale);
 
@@ -185,7 +191,7 @@ export default function Returns() {
       const additions = selectedLines.map(({ item, index, quantity, goodQuantity, defectiveQuantity, returnedQuantity, unitPrice }) => {
         const stockProduct = stockProductByLine.get(index);
         return {
-          id: `${groupId}-${index + 1}`, groupId, saleId: String(selectedSale.id ?? selectedSale.receiptNumber),
+          id: `${groupId}-${index + 1}`, groupId, saleId: String(selectedSale.id ?? selectedSale.receiptNumber), sourceSalesKey: selectedSale.sourceSalesKey || SALES_KEY,
           productId: stockProduct.id, customer: capitalizeName(returnCustomer), product: item.name || stockProduct.name || "Mahsulot",
           quantity, goodQuantity, defectiveQuantity, unitPrice, amount: quantity * unitPrice, reason, status: "approved", date: createdAt,
           category: item.category || item.categoryName || stockProduct.category || "",
@@ -217,7 +223,8 @@ export default function Returns() {
         const sellable = nextStock - nextDefective;
         return { ...product, stock: nextStock, stockIn: Number(product.stockIn || 0) + group.goodQuantity + group.defectiveQuantity, defectiveStock: nextDefective, defects: group.defects.length ? [...defectRows, ...group.defects] : product.defects, status: sellable <= 0 ? "out" : sellable < Number(product.minStock || product.minimumStock || 10) ? "low" : "active" };
       });
-      const currentSales = getSales();
+      const sourceSalesKey = selectedSale.sourceSalesKey || SALES_KEY;
+      const currentSales = getSales(sourceSalesKey);
       if (!Array.isArray(currentSales) || !currentSales.some(sale => String(sale.id ?? sale.receiptNumber) === String(selectedSale.id ?? selectedSale.receiptNumber))) throw new Error("Qaytarilayotgan savdo topilmadi.");
       {
         const sales = currentSales.map(sale => String(sale.id ?? sale.receiptNumber) !== String(selectedSale.id ?? selectedSale.receiptNumber) ? sale : {
@@ -227,14 +234,14 @@ export default function Returns() {
             return line ? { ...item, returnedQuantity: line.returnedQuantity + line.quantity, returned: line.returnedQuantity + line.quantity >= Number(item.qty ?? item.quantity ?? 0), returnedAt: createdAt } : item;
           }),
         });
-        saveSales(sales);
+        saveSales(sales, sourceSalesKey);
       }
       saveProducts(products);
       saveReturns(updated);
       try {
         const customers = getCustomers();
         if (Array.isArray(customers)) {
-          const previousReturnAmount = returnsList.filter(entry => entry.status === "approved" && String(entry.saleId) === String(selectedSale.id ?? selectedSale.receiptNumber)).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+          const previousReturnAmount = returnsList.filter(entry => entry.status === "approved" && String(entry.saleId) === String(selectedSale.id ?? selectedSale.receiptNumber) && (!entry.sourceSalesKey || entry.sourceSalesKey === sourceSalesKey)).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
           const saleDebt = Number(selectedSale.debtBalance ?? Math.max(0, saleTotal(selectedSale) - Number(selectedSale.paidAmount || 0)));
           const debtReduction = Math.min(Math.max(0, saleDebt - previousReturnAmount), returnTotal);
           saveCustomers(customers.map(customer => {
@@ -257,7 +264,7 @@ export default function Returns() {
     catch (cause) { setReturnError(cause?.message || "Qaytarish saqlanmadi. Iltimos, qayta urinib ko‘ring."); return; }
     setReturnsList(updated);
     const quantity = selectedLines.reduce((sum, line) => sum + line.quantity, 0);
-    setReturnAnimation({ amount: returnTotal, title: capitalizeName(returnCustomer) + ": " + selectedLines.length + " xil, " + quantity + " ta mahsulot qaytarish uchun rasmiylashtirildi" });
+    setReturnAnimation({ amount: returnTotal, title: capitalizeName(returnCustomer) + ": " + selectedProductCount + " xil, " + quantity + " ta mahsulot qaytarish uchun rasmiylashtirildi" });
     animationSound.current?.pause();
     const sound = new Audio(checkSound); animationSound.current = sound; sound.play().catch(() => {});
     clearTimeout(animationTimer.current);
@@ -279,7 +286,7 @@ export default function Returns() {
   });
 
   return (
-    <div className="space-y-6 fade-in">
+    <div className="space-y-4 fade-in returns-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display font-bold text-2xl text-primary-color">{tx("Qaytarilgan mahsulotlar")}</h1>
@@ -288,15 +295,16 @@ export default function Returns() {
         <button
           onClick={showModal ? closeReturnModal : () => setShowModal(true)}
           className="btn-primary returns-add-button"
-          aria-label={tx(showModal ? "Yopish" : "Qaytarish qo'shish")}
-          title={tx(showModal ? "Yopish" : "Qaytarish qo'shish")}
+          aria-label={tx(showModal ? "Yopish" : "Tovarni qaytarish")}
+          title={tx(showModal ? "Yopish" : "Tovarni qaytarish")}
         >
           <span className="returns-add-icon">{showModal ? <X size={16} /> : <PackagePlus size={18} />}</span>
+          <span>{tx(showModal ? "Yopish" : "Tovarni qaytarish")}</span>
         </button>
       </div>
 
       {/* Stats */}
-      <div className="returns-stats grid grid-cols-4 gap-4">
+      <div className="returns-stats grid grid-cols-4 gap-3">
         {[
           {
             label: "Shu oydagi qaytarilganlar",
@@ -346,12 +354,12 @@ export default function Returns() {
               </div>
               <div className="space-y-4">
                 <div style={{ position: "relative" }}>
-                  <label className="block text-xs font-semibold mb-1.5 text-secondary-color">{tx("Mijoz ismi, sotuv ID yoki chek raqami")}</label>
-                  <input value={returnLookup} onChange={(event) => { setReturnLookup(capitalizeName(event.target.value)); setHistoryCustomer(null); setPendingSale(null); setSelectedSale(null); setReturnQuantities({}); setConfirmingReturn(false); }} placeholder={tx("Ism, ID yoki chek raqamini yozing...")} className="input-base" autoComplete="off" />
+                  <label className="block text-xs font-semibold mb-1.5 text-secondary-color">{tx("Mijoz ismi yoki sotuv ID")}</label>
+                  <input value={returnLookup} onChange={(event) => { setReturnLookup(capitalizeName(event.target.value)); setHistoryCustomer(null); setPendingSale(null); setSelectedSale(null); setReturnQuantities({}); setConfirmingReturn(false); }} placeholder={tx("Ism yoki ID yozing...")} className="input-base" autoComplete="off" />
                   {!selectedSale && !historyCustomer && lookupQuery && <div className="returns-sale-choices">{customerChoices.length ? customerChoices.map((sale) => <button type="button" key={customerKey(sale)} onClick={() => chooseCustomer(sale)}><span><b>{capitalizeName(sale.customer || sale.customerName || "Mijoz")}</b><small>{sale.customerPhone || tx("Xaridlar tarixini ko‘rish")}</small></span><span><b>{salesForReturn.filter(entry => customerKey(entry) === customerKey(sale)).length} {tx("ta xarid")}</b><small>{tx("Tanlash")}</small></span></button>) : <p>{tx("Bu mijoz bo'yicha savdo topilmadi")}</p>}</div>}
                 </div>
 
-                {historyCustomer && !selectedSale && <div className="returns-history"><div className="returns-history-heading"><div><b>{capitalizeName(historyCustomer.customer || historyCustomer.customerName || "Mijoz")}</b><small>{customerPurchases.length} {tx("ta xarid · Qaytariladigan xaridni tanlang")}</small></div><button className="btn-ghost" onClick={() => { setHistoryCustomer(null); setPendingSale(null); }}>{tx("Mijozni almashtirish")}</button></div><div className="returns-sale-choices">{customerPurchases.map((sale, index) => <button type="button" key={String(sale.id || sale.receiptNumber) + index} aria-pressed={pendingSale === sale} onClick={() => setPendingSale(sale)}><span><b>{formatSaleDate(sale.createdAt || sale.date || sale.formattedDate)}</b><small>{tx("Sotuv")}: {saleNumbers[String(sale.id)] || sale.id || sale.receiptNumber}</small></span><span><b>{formatCurrency(saleTotal(sale))}</b><small>{new Set((sale.items || []).map(item => item.id ?? item.name)).size} {tx("xil mahsulot")}</small></span></button>)}</div></div>}
+                {historyCustomer && !selectedSale && <div className="returns-history"><div className="returns-history-heading"><div><b>{capitalizeName(historyCustomer.customer || historyCustomer.customerName || "Mijoz")}</b><small>{customerPurchases.length} {tx("ta xarid · Qaytariladigan xaridni tanlang")}</small></div><button className="btn-ghost" onClick={() => { setHistoryCustomer(null); setPendingSale(null); }}>{tx("Mijozni almashtirish")}</button></div><div className="returns-sale-choices">{customerPurchases.map((sale, index) => <button type="button" key={String(sale.id || sale.receiptNumber) + index} aria-pressed={pendingSale === sale} onClick={() => setPendingSale(sale)}><span><b>{formatSaleDate(sale.createdAt || sale.date || sale.formattedDate)}</b><small>{tx("Sotuv")}: {saleNumbers[String(sale.id)] || sale.id || sale.receiptNumber}</small></span><span><b>{formatCurrency(saleTotal(sale))}</b><small>{uniqueProductCount(sale.items, sale.products)} {tx("xil mahsulot")}</small></span></button>)}</div></div>}
                 {selectedSale && <>
                   <div className="returns-selected-sale"><span><b>{capitalizeName(returnCustomer)}</b><small>{saleNumbers[String(selectedSale.id)] || selectedSale.id || selectedSale.receiptNumber} · {formatSaleDate(selectedSale.date || selectedSale.createdAt || selectedSale.formattedDate)}</small></span><span><small>{tx("Savdo jami")}</small><b>{formatCurrency(selectedSaleTotal)}</b></span></div>
                   <div className="returns-products-section">
@@ -374,8 +382,8 @@ export default function Returns() {
                       {reasonOptions.map((o) => <option key={o} value={o}>{tx(o)}</option>)}
                     </select>
                   </div>
-                  <div className="returns-total-summary"><span><small>{tx("Qaytariladigan mahsulotlar")}</small><b>{selectedLines.length} {tx("xil")}</b></span><span className="refund-total"><small>{tx("Qaytarish summasi")}</small><b>{formatCurrency(returnTotal)}</b></span></div>
-                  {confirmingReturn && <div role="alert" style={{ padding: 14, border: "1px solid var(--warning)", borderRadius: 12, background: "var(--warning-light)" }}><b>{tx("Qaytarishni tasdiqlaysizmi?")}</b><p className="text-sm mt-1">{selectedLines.length} {tx("xil mahsulot")}, {formatCurrency(returnTotal)} — {tx("ma'lumotlarni tekshirib tasdiqlang")}</p></div>}
+                  <div className="returns-total-summary"><span><small>{tx("Qaytariladigan mahsulotlar")}</small><b>{selectedProductCount} {tx("xil")}</b></span><span className="refund-total"><small>{tx("Qaytarish summasi")}</small><b>{formatCurrency(returnTotal)}</b></span></div>
+                  {confirmingReturn && <div role="alert" style={{ padding: 14, border: "1px solid var(--warning)", borderRadius: 12, background: "var(--warning-light)" }}><b>{tx("Qaytarishni tasdiqlaysizmi?")}</b><p className="text-sm mt-1">{selectedProductCount} {tx("xil mahsulot")}, {formatCurrency(returnTotal)} — {tx("ma'lumotlarni tekshirib tasdiqlang")}</p></div>}
                 </>}
               </div>
               {returnError && <div className="returns-validation-message" role="alert"><AlertCircle size={18}/><span>{tx(returnError)}</span></div>}
@@ -391,7 +399,7 @@ export default function Returns() {
 
       {/* Table */}
       <div className="returns-table-card card-flat rounded-2xl">
-        <div className="returns-filter-toolbar px-5 py-4 border-b-subtle">
+        <div className="returns-filter-toolbar px-4 py-3 border-b-subtle">
           <div className="search-box-wrapper flex items-center gap-2 rounded-xl px-3 py-2.5 flex-1">
             <Search size={14} className="text-faint-color" />
             <input
@@ -406,7 +414,7 @@ export default function Returns() {
         </div>
 
         <div className="returns-table-scroll" role="region" aria-label={tx("Qaytarishlar jadvali")} tabIndex="0">
-        <table className="returns-table w-full">
+        <table className="returns-table returns-history-table w-full">
           <thead>
             <tr className="table-header-row">
               {[
@@ -419,10 +427,11 @@ export default function Returns() {
                 "Sana",
                 "Manzil",
                 "Holat",
+                "Chek",
               ].map((h, i) => (
                 <th
                   key={i}
-                  className="text-left px-5 py-3 text-xs font-semibold text-faint-color"
+                  className="text-left px-3 py-3 text-xs font-semibold text-faint-color"
                 >
                   {tx(h)}
                 </th>
@@ -430,36 +439,36 @@ export default function Returns() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={9} className="px-5 py-10 text-center text-sm text-muted-color">{tx("Qaytarishlar topilmadi")}</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={10} className="px-5 py-10 text-center text-sm text-muted-color">{tx("Qaytarishlar topilmadi")}</td></tr>}
             {filtered.map((r) => {
               const st = statusMap[r.status] || statusMap.approved;
               const Icon = st.icon;
               return (
                 <tr key={r.id} className="border-t table-row-hover" tabIndex={0} style={{ cursor: "pointer" }} onClick={() => setSelectedReturn(r)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setSelectedReturn(r); } }}>
-                  <td className="px-5 py-3.5 font-mono text-xs font-semibold text-muted-color">
+                  <td className="px-3 py-2.5 font-mono text-xs font-semibold text-muted-color">
                     {returnNumbers[r.id] || r.id}
                   </td>
-                  <td className="px-5 py-3.5 font-mono text-xs text-faint-color">
+                  <td className="px-3 py-2.5 font-mono text-xs text-faint-color">
                     {saleNumbers[r.saleId] || r.saleId}
                   </td>
-                  <td className="px-5 py-3.5 text-sm font-medium text-primary-color">
+                  <td className="px-3 py-2.5 text-sm font-medium text-primary-color">
                     {r.customer}
                   </td>
-                  <td className="px-5 py-3.5 text-sm text-secondary-color">
+                  <td className="px-3 py-2.5 text-sm text-secondary-color">
                     {r.lines[0]?.product || r.product}{r.lines.length > 1 && <span aria-label={tx("Qolgan mahsulotlarni tafsilotlarda ko‘ring")} style={{ marginLeft: 4, color: "var(--text-muted)", fontWeight: 700 }}>...</span>}
                   </td>
-                  <td className="px-5 py-3.5 text-sm text-muted-color">
+                  <td className="px-3 py-2.5 text-sm text-muted-color">
                     {tx(r.reason)}
                   </td>
-                  <td className="px-5 py-3.5 text-sm font-semibold text-danger-color">
+                  <td className="px-3 py-2.5 text-sm font-semibold text-danger-color">
                     -{formatCurrency(r.amount)}</td>
-                  <td className="px-5 py-3.5 text-xs text-faint-color">
+                  <td className="px-3 py-2.5 text-xs text-faint-color">
                     {tx(Number.isNaN(new Date(r.date).getTime()) ? r.date : new Date(r.date).toLocaleDateString("uz-UZ"))}
                   </td>
-                  <td className="px-5 py-3.5 text-xs text-muted-color">
+                  <td className="px-3 py-2.5 text-xs text-muted-color">
                     {tx(r.deliveryAddress || "—")}
                   </td>
-                  <td className="px-5 py-3.5">
+                  <td className="px-3 py-2.5">
                     <span
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold w-fit"
                       style={{
@@ -470,6 +479,18 @@ export default function Returns() {
                       <Icon size={10} />
                       {tx(st.label)}
                     </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <button
+                      type="button"
+                      className="returns-receipt-button"
+                      title={tx("Qaytarish chekini ko‘rish")}
+                      aria-label={`${tx("Chek")}: ${returnNumbers[r.id] || r.id}`}
+                      onClick={(event) => { event.stopPropagation(); setSelectedReturn(r); }}
+                    >
+                      <Printer size={14} />
+                      {tx("Chek")}
+                    </button>
                   </td>
                 </tr>
               );
@@ -490,7 +511,7 @@ export default function Returns() {
           const receiptRecord = { ...selectedReturn, id: returnNumbers[selectedReturn.id] || selectedReturn.id, saleId: saleNumbers[selectedReturn.saleId] || selectedReturn.saleId };
           return <div className="return-document customer-return-document">
             <div className="return-document-head">
-              <div><small>{tx("MIJOZ QAYTARGAN MAHSULOTLAR")}</small><h3>{selectedReturn.customer || tx("Mijoz")}</h3><p>{tx("Qaytarilgan sana va vaqt")}: {formatSaleDate(selectedReturn.date)}</p></div>
+              <div><small>{tx("Mijoz qaytargan mahsulotlar")}</small><h3>{selectedReturn.customer || tx("Mijoz")}</h3><p>{tx("Qaytarilgan sana va vaqt")}: {formatSaleDate(selectedReturn.date)}</p></div>
               <span>{tx(statusMap[selectedReturn.status]?.label || "—")}</span>
             </div>
             <dl className="return-document-meta">{[
@@ -499,7 +520,7 @@ export default function Returns() {
               ["Xarid sanasi", formatSaleDate(selectedReturn.purchaseDate)],
               ["Telefon", selectedReturn.customerPhone || "—"],
               ["Manzil", selectedReturn.deliveryAddress || "—"],
-              ["Mahsulot turlari", tx(lines.length + " xil")],
+              ["Mahsulot turlari", tx(uniqueProductCount(lines) + " xil")],
             ].map(([label, value]) => <div key={label}><dt>{tx(label)}</dt><dd>{value}</dd></div>)}</dl>
             <section className="customer-return-items" aria-label={tx("Qaytarilgan mahsulotlar")}>
               {lines.map(line => {

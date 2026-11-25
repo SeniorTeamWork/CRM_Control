@@ -1,5 +1,6 @@
 import { reportDay } from "./reportPeriod";
 import { getTenantCompanyName } from "./tenantBrand";
+import { uniqueProductCount } from "./productCounts";
 
 const pad = value => String(value).padStart(2, "0");
 const makeDay = (year, month, day) => `${year}-${pad(month)}-${pad(day)}`;
@@ -106,7 +107,7 @@ export function createSalesWord(sales, period, now = new Date(), companyName = g
   body += '<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblBorders>' + ["top", "left", "bottom", "right", "insideH", "insideV"].map(edge => '<w:' + edge + ' w:val="single" w:sz="4" w:color="E2E8F0"/>').join("") + '</w:tblBorders></w:tblPr><w:tblGrid>' + headings.map(() => '<w:gridCol w:w="1900"/>').join("") + '</w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr>' + headings.map(cell).join("") + '</w:tr>';
   sales.forEach(sale => {
     const date = new Date(sale.createdAt || sale.date).toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent" });
-    body += '<w:tr><w:trPr><w:cantSplit/></w:trPr>' + [(sale.displayId || sale.id) + " / " + date, sale.customer, (sale.items || []).map(item => item.name + " × " + (item.qty ?? item.quantity ?? 0)).join("; ") || sale.products + " xil", money(sale.amount), money(sale.debtBalance)].map(cell).join("") + '</w:tr>';
+    body += '<w:tr><w:trPr><w:cantSplit/></w:trPr>' + [(sale.displayId || sale.id) + " / " + date, sale.customer, ((sale.items || []).map(item => item.name + " × " + (item.qty ?? item.quantity ?? 0)).join("; ") || "") + " · " + uniqueProductCount(sale.items, sale.products) + " xil", money(sale.amount), money(sale.debtBalance)].map(cell).join("") + '</w:tr>';
   });
   body += '</w:tbl>' + paragraph(sales.length ? "Summalar saqlangan sotuvlar va joriy qarz qoldiqlari asosida hisoblandi." : "Tanlangan davrda sotuvlar qayd etilmagan.", 20, false, "64748B");
   return zip({

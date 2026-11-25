@@ -3601,6 +3601,23 @@ html[data-theme="dark"] .pos-container .pos-cart-address-select { border-color: 
 .pos-save-draft-summary span { color: var(--text-muted); }
 .pos-save-draft-summary strong { color: var(--text-primary); text-align: right; }
 .pos-save-draft-summary .pos-save-draft-total strong { color: var(--brand); font-size: 16px; }
+.pos-reservation-advance { display: grid; gap: 7px; padding: 11px 0; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; }
+.pos-reservation-advance small { color: var(--text-faint); font-size: 11px; }
+.pos-reservation-advance > div { position: relative; display: flex; align-items: center; }
+.pos-reservation-advance input { width: 100%; padding-right: 54px; }
+.pos-reservation-advance em { position: absolute; right: 12px; color: var(--text-muted); font-size: 12px; font-style: normal; }
+.pos-reservation-method { margin: 0; padding: 0 0 10px; border: 0; }
+.pos-reservation-method legend { margin-bottom: 7px; color: var(--text-muted); font-size: 12px; }
+.pos-reservation-method > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pos-reservation-method button { min-height: 38px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-primary); font-weight: 700; cursor: pointer; transition: border-color .16s ease, background .16s ease, color .16s ease; }
+.pos-reservation-method button.is-active { border-color: var(--brand); background: var(--brand-light); color: var(--brand); }
+.pos-save-draft-summary > .receiving-card-select { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: stretch; gap: 8px; width: 100%; padding: 12px 0; }
+.pos-save-draft-summary > .receiving-card-select > label { margin: 0; }
+.pos-save-draft-summary > .receiving-card-select select { box-sizing: border-box; width: 100%; min-width: 0; }
+.pos-save-draft-summary > .receiving-card-select .receiving-card-preview { min-width: 0; margin-top: 0; }
+.pos-save-draft-summary > .receiving-card-select > p { margin: 0; }
+.pos-reservation-payment-preview { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text-muted); font-size: 12px; }
+.pos-reservation-payment-preview strong { color: var(--brand); font-size: 14px; }
 .pos-save-draft-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
 .pos-save-draft-actions button { min-height: 42px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-primary); font-weight: 700; cursor: pointer; }
 .pos-save-draft-actions button:last-child { border-color: var(--brand); background: var(--brand); color: #fff; }

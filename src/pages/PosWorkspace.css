@@ -8,7 +8,7 @@
 .pos-window-tab span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13px; }
 .pos-window-tab small { color: var(--text-muted); white-space: nowrap; }
 .pos-window-tab .pos-window-close { padding: 8px; }
-.pos-window-new { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; color: var(--brand); background: var(--surface); white-space: nowrap; cursor: pointer; }
+.pos-window-new { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; min-width: 40px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; color: var(--brand); background: var(--surface); white-space: nowrap; cursor: pointer; }
 .pos-window-bar button:disabled { opacity: .55; cursor: not-allowed; }
 .pos-workspace > .pos-container { flex: 1; min-height: 0; height: auto; }
 .pos-window-confirm { display: flex; gap: 12px; margin-top: 20px; }

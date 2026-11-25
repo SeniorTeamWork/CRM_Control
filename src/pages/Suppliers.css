@@ -348,6 +348,9 @@
 .supplier-receipt-payment-total { min-height: 43px; padding: 12px; border-radius: 12px; background: var(--surface-2); }
 .supplier-receipt-payment-total small { display: block; color: var(--text-muted); }
 .supplier-receipt-payment-total b { display: block; margin-top: 4px; color: var(--text-primary); overflow-wrap: anywhere; }
+.supplier-receipt-debt { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.supplier-receipt-debt small,
+.supplier-receipt-debt b { color: var(--danger); }
 .supplier-receipt-cash b { color: var(--success); }
 .supplier-form-help { margin: -10px 0 0; color: var(--text-muted); font-size: 12px; }
 .supplier-identity-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: end; }
@@ -379,3 +382,6 @@
   }
   .supplier-return-picker-button > span { display: none; }
 }
+.supplier-profile-eye { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--brand); cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.supplier-profile-eye:hover { background: var(--brand-light); border-color: var(--brand); transform: translateY(-1px); }
+.supplier-profile-eye:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
