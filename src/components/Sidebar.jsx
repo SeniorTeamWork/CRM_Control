@@ -21,6 +21,7 @@ import {
   ChevronRight,
   PlusCircle,
   RotateCcw,
+  ArrowLeftRight,
   // Building2,
   Store,
   X,
@@ -72,6 +73,12 @@ export const buildNavItems = (t) => [
         id: "sales-returns",
         label: t("sidebar.sales.returns", "Qaytarilgan"),
         icon: RotateCcw,
+      },
+      {
+        // Qo'shnidan qarzga olib sotilgan tovarlar.
+        id: "sales-transfer",
+        label: "Qarzdagi tovar",
+        icon: ArrowLeftRight,
       },
     ],
   },

@@ -18,6 +18,7 @@ import Dashboard from "./pages/Dashboard";
 import Sales from "./pages/Sales";
 import POS from "./pages/PosWorkspace";
 import Returns from "./pages/Returns";
+import Transfers from "./pages/Transfers";
 import Products from "./pages/Products";
 import DefectiveProducts from "./pages/DefectiveProducts";
 import ProductDetail from "./pages/ProductDetail";
@@ -206,6 +207,8 @@ function renderPage(page, onNavigate, onBack, user, onProfileSaved, posCartProps
       return <POS key="additional-pos" {...posCartProps} currentUser={user} onSaveOrder={saveOrder} onSaleActionComplete={onSelectSaleSection} headingText="Sotuv bo‘limi" workspaceKey="crm_additional_pos_windows_v2" draftKeyPrefix="crm_additional_pos_v2_draft_" migrateLegacyDraft={false} salesStorageKey="crm_additional_pos_sales" customerStorageKey="crm_additional_pos_customers" salesDocumentType="additional-pos" saleSection={defectCheckoutMode ? "" : saleSection} saleSectionLabel={defectCheckoutMode ? "Brak" : saleSection} initialDefectItem={initialDefectItem} onDefectSaleStarted={onDefectSaleStarted} />;
     case "sales-returns":
       return <Returns />;
+    case "sales-transfer":
+      return <Transfers />;
     case "orders":
       return <Orders currentUser={user} onNavigate={onNavigate} {...ordersProps} />;
     case "pending-pickups":

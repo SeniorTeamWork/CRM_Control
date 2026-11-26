@@ -1,6 +1,6 @@
 import { createCredentials, verifyPassword } from "../data/accessStore";
 import { assertNotLocked, recordFailure, recordSuccess } from "../data/loginThrottle";
-import { getData, setData } from "../supabase/db";
+import { getData, setData, superAdminSetupState } from "../supabase/db";
 import { superAdminEslatma, superAdminTokeniniOchir } from "../supabase/mijozLoyiha";
 
 const ADMIN_KEY = "super_admin_data_v1";
@@ -65,9 +65,22 @@ function eslatmaYoz(password) {
 
 // Super Admin hisobi: sayt parolni faqat PBKDF2 xeshi bilan tekshiradi.
 // Sessiya "1" emas, hisob salt'iga bog'langan: parol almashsa, eski sessiya yaroqsiz bo'ladi.
+// Yangi Super Admin hisobini faqat haqiqiy birinchi o'rnatishda yaratish mumkin.
+// Aks holda (masalan, Supabase'dan hisob yuklanmay qolsa) mijoz o'z login-paroli bilan
+// "yangi hisob yaratib" Super Admin paneliga kirib ketishi mumkin edi.
+export function canCreateAdminAccount() {
+  const data = readAdminData();
+  if (data.account) return false;
+  if (data.tenants.length > 0) return false;
+  const setup = superAdminSetupState();
+  if (setup.supabase && (!setup.checked || setup.found)) return false;
+  return true;
+}
+
 export async function createAdminAccount(login, password) {
   const data = readAdminData();
   if (data.account) throw new Error("Super Admin hisobi allaqachon mavjud.");
+  if (!canCreateAdminAccount()) throw new Error("Super Admin hisobini bu yerda yaratib bo'lmaydi. Hisob ma'lumotlari yuklanmadi — internet va Supabase ulanishini tekshirib, sahifani yangilang.");
   const account = await createCredentials(login, password);
   saveAdminData({ ...data, account, meta: { ...data.meta, lastLoginAt: new Date().toISOString() } });
   sessionStorage.setItem(ADMIN_SESSION_KEY, account.salt);

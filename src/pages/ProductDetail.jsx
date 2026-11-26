@@ -32,6 +32,7 @@ import { useLanguage } from "../context/LanguageContext";
 import { currencyLabel, formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
 import { getData, setData } from "../supabase/db";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
+import { findSameNameProduct, findSkuOwner, productLabel, skuTakenMessage } from "../data/productIdentity";
 const readList = (key) => {
   try { const value = getData(key, []); return Array.isArray(value) ? value : []; } catch { return []; }
 };
@@ -368,6 +369,15 @@ export default function ProductDetail({ productId, onBack, animateDefectCount = 
     setIsEditOpen(true);
   };
   const saveEdit = () => {
+    {
+      const catalog = (Array.isArray(getProducts([])) ? getProducts([]) : []);
+      // Eski (oldindan bor) dublikatlar tahrirlashni to'smasin — faqat o'zgartirilgan qiymat tekshiriladi.
+      const changed = (key) => String(editForm[key] ?? "").trim().toLocaleLowerCase("uz-UZ") !== String(product?.[key] ?? "").trim().toLocaleLowerCase("uz-UZ");
+      const skuOwner = changed("sku") && findSkuOwner(catalog, { sku: editForm.sku, name: editForm.name, brand: editForm.brand, excludeId: product?.id });
+      if (skuOwner) { error(skuTakenMessage(String(editForm.sku).trim(), skuOwner)); return; }
+      const sameProduct = (changed("name") || changed("brand")) && findSameNameProduct(catalog, { name: editForm.name, brand: editForm.brand, excludeId: product?.id });
+      if (sameProduct) { error(`"${productLabel(sameProduct)}" mahsuloti allaqachon mavjud. Bir mahsulot ikki marta bo'lishi mumkin emas.`); return; }
+    }
     if (!editForm.name.trim() || editForm.price === "" || editForm.cost === "" || editForm.stock === "") {
       error("Mahsulot nomi, narxlari va qoldig'ini kiriting");
       return;
@@ -1097,7 +1107,7 @@ export default function ProductDetail({ productId, onBack, animateDefectCount = 
           <Field label={tx("Mahsulot nomi")}><input className="input-base" value={editForm.name || ""} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={tx("Brend")}><input className="input-base" value={editForm.brand || ""} onChange={(e) => setEditForm({ ...editForm, brand: e.target.value })} /></Field>
-            <Field label={tx("SKU kodi")}><input className="input-base" value={editForm.sku || ""} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} /></Field>
+            {(() => { const skuChanged = String(editForm.sku ?? "").trim().toLocaleLowerCase("uz-UZ") !== String(product?.sku ?? "").trim().toLocaleLowerCase("uz-UZ"); const skuTaken = skuChanged && findSkuOwner(getProducts([]), { sku: editForm.sku, name: editForm.name, brand: editForm.brand, excludeId: product?.id }); return <Field label={tx("SKU kodi")}><input className="input-base" value={editForm.sku || ""} aria-invalid={Boolean(skuTaken)} style={skuTaken ? { borderColor: "var(--danger)", background: "var(--danger-light)", color: "var(--danger)" } : undefined} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} />{skuTaken && <small style={{ display: "block", marginTop: 6, color: "var(--danger)", fontSize: 12 }}>{tx(skuTakenMessage(String(editForm.sku).trim(), skuTaken))}</small>}</Field>; })()}
             <Field label={tx("Kategoriya")}><input className="input-base" value={editForm.category || ""} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} /></Field>
             <Field label={tx("Qoldiq")}><input type="number" min="0" className="input-base" value={editForm.stock ?? ""} onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })} /></Field>
             <Field label={tx("Sotuv narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.price, true)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>

@@ -3675,25 +3675,32 @@ html[data-theme="dark"] .pos-container.pos-split-layout .pos-cart-items-footer .
   background: #172033;
 }
 
-@media (max-width: 1359px) {
-  .app-pos-content .pos-container.pos-split-layout {
+/* Kompyuter ko'rinishi: 3 ustun masshtab oshirilganda ham saqlanadi — ustunlar siqilib ketmaydi,
+   joy yetmasa sahifa yonga suriladi. */
+.app-pos-content .pos-container.pos-split-layout:not(.pos-compact) {
+  grid-template-columns: minmax(380px, 1.6fr) minmax(300px, 1fr) minmax(300px, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Ixcham rejim: POS.jsx konteyner kengligiga qarab .pos-compact klassini qo'shadi */
+.app-pos-content .pos-container.pos-split-layout.pos-compact {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: minmax(420px, auto) minmax(420px, auto);
     height: auto;
     overflow-y: auto;
   }
-  .pos-container.pos-split-layout .pos-products-section { grid-column: 1 / -1; min-height: 420px; }
-  .pos-container.pos-split-layout .pos-cart-items-panel,
-  .pos-container.pos-split-layout .pos-order-panel { min-height: 420px; }
-  .pos-container.pos-split-layout .pos-order-panel {
+.pos-container.pos-split-layout.pos-compact .pos-products-section { grid-column: 1 / -1; min-height: 420px; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-items-panel,
+.pos-container.pos-split-layout.pos-compact .pos-order-panel { min-height: 420px; }
+.pos-container.pos-split-layout.pos-compact .pos-order-panel {
     height: auto;
     min-height: max-content;
   }
-  .pos-container.pos-split-layout .pos-order-body {
+.pos-container.pos-split-layout.pos-compact .pos-order-body {
     flex: 0 0 auto;
     overflow: visible;
   }
-}
 
 @media (max-width: 700px) {
   .app-pos-content .pos-container.pos-split-layout {
@@ -3949,8 +3956,8 @@ html[data-theme="dark"] .pos-faceid-copy strong { color: #f8fafc; }
 .pos-cart-window-body { display: contents; }
 .pos-cart-launcher { display: none; }
 
-@media (max-width: 1359px) {
-  .app-pos-content .pos-container.pos-split-layout {
+/* Ixcham rejim: POS.jsx konteyner kengligiga qarab .pos-compact klassini qo'shadi */
+.app-pos-content .pos-container.pos-split-layout.pos-compact {
     position: relative;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
@@ -3960,11 +3967,11 @@ html[data-theme="dark"] .pos-faceid-copy strong { color: #f8fafc; }
     padding-bottom: 0;
     overflow: hidden;
   }
-  .pos-container.pos-split-layout .pos-products-section {
+.pos-container.pos-split-layout.pos-compact .pos-products-section {
     min-height: 0;
     overflow: hidden;
   }
-  .pos-container.pos-split-layout .pos-cart-launcher {
+.pos-container.pos-split-layout.pos-compact .pos-cart-launcher {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -3980,10 +3987,10 @@ html[data-theme="dark"] .pos-faceid-copy strong { color: #f8fafc; }
     font-weight: 700;
     cursor: pointer;
   }
-  .pos-cart-launcher strong { margin-left: auto; text-align: right; font-size: 14px; }
-  .pos-cart-launcher small { font-size: 12px; }
-  .pos-container.pos-split-layout .pos-cart-window { display: none; }
-  .pos-container.pos-split-layout .pos-cart-window.is-open {
+.pos-compact .pos-cart-launcher strong { margin-left: auto; text-align: right; font-size: 14px; }
+.pos-compact .pos-cart-launcher small { font-size: 12px; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window { display: none; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window.is-open {
     position: absolute;
     inset: 0;
     z-index: 10;
@@ -3997,7 +4004,7 @@ html[data-theme="dark"] .pos-faceid-copy strong { color: #f8fafc; }
     border: 1px solid var(--border, #e1e9f5);
     border-radius: 12px;
   }
-  .pos-cart-window-body {
+.pos-compact .pos-cart-window-body {
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -4007,25 +4014,24 @@ html[data-theme="dark"] .pos-faceid-copy strong { color: #f8fafc; }
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .pos-container.pos-split-layout .pos-cart-window :is(.pos-cart-items-panel, .pos-order-panel) {
+.pos-container.pos-split-layout.pos-compact .pos-cart-window :is(.pos-cart-items-panel, .pos-order-panel) {
     flex: 0 0 auto;
     width: 100%;
     height: auto;
     min-height: 0;
     overflow: visible;
   }
-  .pos-container.pos-split-layout .pos-cart-window :is(.pos-cart-items-body, .cart-items-scroll-area, .pos-order-body, .pos-payment-body) {
+.pos-container.pos-split-layout.pos-compact .pos-cart-window :is(.pos-cart-items-body, .cart-items-scroll-area, .pos-order-body, .pos-payment-body) {
     flex: 0 0 auto;
     min-height: 0;
     overflow: visible;
   }
-  .pos-container.pos-split-layout .pos-cart-window .pos-order-panel > .cart-header { display: none; }
-  .pos-container.pos-split-layout .pos-cart-window.is-paying .pos-cart-items-panel { display: none; }
-  .pos-container.pos-split-layout .pos-cart-window :is(.pos-order-footer, .pos-cart-items-footer) { margin-top: 12px; }
-  .pos-container.pos-split-layout .pos-cart-window .pos-qty-controls { height: 40px; }
-  .pos-container.pos-split-layout .pos-cart-window .pos-qty-btn { width: 38px; height: 38px; }
-  .pos-container.pos-split-layout .pos-cart-window .pos-delete-btn { width: 32px; height: 32px; }
-}
+.pos-container.pos-split-layout.pos-compact .pos-cart-window .pos-order-panel > .cart-header { display: none; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window.is-paying .pos-cart-items-panel { display: none; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window :is(.pos-order-footer, .pos-cart-items-footer) { margin-top: 12px; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window .pos-qty-controls { height: 40px; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window .pos-qty-btn { width: 38px; height: 38px; }
+.pos-container.pos-split-layout.pos-compact .pos-cart-window .pos-delete-btn { width: 32px; height: 32px; }
 
 /* Full-width product rows in the POS catalog. */
 .pos-container.pos-split-layout .pos-products-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }

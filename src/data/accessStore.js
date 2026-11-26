@@ -11,6 +11,7 @@ export const ACCESS_SECTIONS = [
   { id: "sales-new", group: "Sotuvlar", label: "Yangi sotuv (POS)" },
   { id: "sales-pos", group: "Sotuvlar", label: "Qo‘shimcha sotuv" },
   { id: "sales-returns", group: "Sotuvlar", label: "Qaytmalar" },
+  { id: "sales-transfer", group: "Sotuvlar", label: "Qarzdagi tovar" },
   { id: "orders-reservations", label: "Band qilinganlar" },
   { id: "pending-pickups", label: "Yetkazib berish" },
   { id: "products-all", group: "Mahsulotlar", label: "Barcha mahsulotlar" },
@@ -30,7 +31,7 @@ export const ACCESS_SECTIONS = [
 ];
 
 const LEGACY_PERMISSION_GROUPS = {
-  sales: ["sales-all", "sales-new", "sales-pos", "sales-returns"],
+  sales: ["sales-all", "sales-new", "sales-pos", "sales-returns", "sales-transfer"],
   products: ["products-all", "defective-products"],
   customers: ["customers-all"],
   suppliers: ["suppliers-main", "suppliers-returns"],

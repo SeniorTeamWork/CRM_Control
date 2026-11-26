@@ -21,7 +21,7 @@ const toTime = (value) => {
   return Number.isFinite(time) ? time : 0;
 };
 
-export default function ProductQuickAddModal({ product, suppliers, quantity, onQuantityChange, onAdd, defectRows = [], initialDefectId = null, onClose }) {
+export default function ProductQuickAddModal({ product, suppliers, quantity, onQuantityChange, onAdd, defectRows = [], initialDefectId = null, onClose, allowBeyondStock = false }) {
   useLanguage();
   const quantityRef = useRef(null);
   const allowZeroQuantity = Boolean(initialDefectId);
@@ -29,6 +29,10 @@ export default function ProductQuickAddModal({ product, suppliers, quantity, onQ
   const defectOptions = Array.isArray(defectRows) ? defectRows : null;
   const stock = Math.max(0, Math.floor(Number(product.defectLotQuantity ?? product.stock) || 0));
   const unitPrice = Number(product.defectPrice ?? product.price) || 0;
+  // Sotuvda qoldiqdan ko'p sotish mumkin (yetmagani qo'shnidan olinadi — "Qarzdagi tovar").
+  const maxQuantity = allowBeyondStock ? Infinity : stock;
+  const canSell = allowBeyondStock || stock > 0;
+  const borrowQuantity = allowBeyondStock ? Math.max(0, (Number(quantity) || 0) - stock) : 0;
   const visibleDefectOptions = defectOptions
     ? defectOptions.filter((row) => !String(row.defectStatus || "").trim().toLocaleLowerCase("uz-UZ").startsWith("qisman ishlaydi"))
     : null;
@@ -67,7 +71,7 @@ export default function ProductQuickAddModal({ product, suppliers, quantity, onQ
     if (value === "") return onQuantityChange("");
     const number = Number(value);
     if (!Number.isFinite(number)) return;
-    onQuantityChange(String(Math.max(0, Math.min(stock, Math.floor(number)))));
+    onQuantityChange(String(Math.max(0, Math.min(maxQuantity, Math.floor(number)))));
   };
 
   const setDefectQuantity = (defectId, availableStock, value) => {
@@ -130,11 +134,12 @@ export default function ProductQuickAddModal({ product, suppliers, quantity, onQ
           <div className="product-quick-quantity">
             <label htmlFor="product-quick-quantity">{tx(product.defectId ? "Brak" : "Yaroqli")}</label>
             <div className="product-quick-stepper">
-              <button type="button" aria-label={tx("Kamaytirish")} disabled={Number(quantity) <= (allowZeroQuantity ? 0 : 1) || !stock} onClick={() => setQuantity(Number(quantity || 1) - 1)}><Minus size={17} /></button>
-              <input ref={quantityRef} id="product-quick-quantity" type="number" inputMode="numeric" min={allowZeroQuantity ? "0" : "1"} max={stock} step="1" value={quantity} disabled={!stock} aria-label={tx(product.defectId ? "Brak" : "Yaroqli")} onChange={(event) => setQuantity(event.target.value)} />
-              <button type="button" aria-label={tx("Ko'paytirish")} disabled={!stock || Number(quantity) >= stock} onClick={() => setQuantity(Number(quantity || 0) + 1)}><Plus size={17} /></button>
+              <button type="button" aria-label={tx("Kamaytirish")} disabled={Number(quantity) <= (allowZeroQuantity ? 0 : 1) || !canSell} onClick={() => setQuantity(Number(quantity || 1) - 1)}><Minus size={17} /></button>
+              <input ref={quantityRef} id="product-quick-quantity" type="number" inputMode="numeric" min={allowZeroQuantity ? "0" : "1"} max={allowBeyondStock ? undefined : stock} step="1" value={quantity} disabled={!canSell} aria-label={tx(product.defectId ? "Brak" : "Yaroqli")} onChange={(event) => setQuantity(event.target.value)} />
+              <button type="button" aria-label={tx("Ko'paytirish")} disabled={!canSell || Number(quantity) >= maxQuantity} onClick={() => setQuantity(Number(quantity || 0) + 1)}><Plus size={17} /></button>
             </div>
             <small>{stock ? `${tx("Mavjud")} ${stock.toLocaleString()} ${tx("dona")}` : tx("Mahsulot tugagan")}</small>
+            {borrowQuantity > 0 && <small style={{ display: "block", color: "#b45309", fontWeight: 600 }}>{tx("Qarzdagi tovar")}: {borrowQuantity.toLocaleString()} {tx("dona")}</small>}
           </div>
 
           {allDefectQuantity > 0 && (
@@ -151,7 +156,7 @@ export default function ProductQuickAddModal({ product, suppliers, quantity, onQ
           )}
 
           <button type="button" className="product-quick-cancel" onClick={onClose}>{tx("Bekor qilish")}</button>
-          <button type="button" className="product-quick-add" disabled={(!stock && selectedDefectLines.length === 0) || (!Number(quantity) && selectedDefectLines.length === 0)} onClick={() => onAdd(Number(quantity), selectedDefectLines)}><ShoppingCart size={17} />{tx("Savatga qo'shish")}</button>
+          <button type="button" className="product-quick-add" disabled={(!canSell && selectedDefectLines.length === 0) || (!Number(quantity) && selectedDefectLines.length === 0)} onClick={() => onAdd(Number(quantity), selectedDefectLines)}><ShoppingCart size={17} />{tx("Savatga qo'shish")}</button>
         </footer>
       </section>
     </div>,

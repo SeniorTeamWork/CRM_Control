@@ -164,18 +164,40 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const [selectedProductSelect] =
     useState("");
   const productsGridRef = useRef(null);
-  const [compactCart, setCompactCart] = useState(() => window.matchMedia("(max-width: 1359px)").matches);
+  // POS ko'rinishi:
+  //  - kompyuterda har doim 3 ustun (mahsulotlar | savatcha | buyurtma) — brauzer masshtabi (Ctrl +)
+  //    oshirilsa ham saqlanadi; joy yetmasa ustunlar siqilmaydi, sahifa yonga suriladi;
+  //  - pastdagi ko'k "Savatcha" tugmasi faqat telefon/planshetda yoki oynaning o'zi tor bo'lsa chiqadi.
+  // Masshtabni oyna torligidan ajratish uchun window.outerWidth ishlatiladi: u Ctrl + bilan o'zgarmaydi.
+  const POS_WIDE_MIN = 940, POS_PHONE_WINDOW = 900;
+  const isTouchDevice = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+  const isPhoneWindow = () => (window.outerWidth || window.innerWidth) < POS_PHONE_WINDOW;
+  const posContainerRef = useRef(null);
+  const [compactCart, setCompactCart] = useState(() => isPhoneWindow() || (isTouchDevice() && window.innerWidth < 1100));
+  const compactRef = useRef(compactCart);
   const cartToggleRef = useRef(null);
   const cartWindowBodyRef = useRef(null);
 
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 1359px)");
-    const update = () => {
-      setCompactCart(query.matches);
-      if (!query.matches) onCartWindowChange?.(false);
+  useLayoutEffect(() => {
+    const element = posContainerRef.current;
+    if (!element) return undefined;
+    const measure = () => {
+      const width = element.getBoundingClientRect().width;
+      if (!width) return;
+      const narrow = width < (compactRef.current ? POS_WIDE_MIN + 40 : POS_WIDE_MIN);
+      const nextCompact = isPhoneWindow() || (narrow && isTouchDevice());
+      if (nextCompact === compactRef.current) return;
+      compactRef.current = nextCompact;
+      setCompactCart(nextCompact);
+      if (!nextCompact) onCartWindowChange?.(false);
     };
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    measure();
+    const touchQuery = window.matchMedia?.("(pointer: coarse)");
+    touchQuery?.addEventListener?.("change", measure);
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); touchQuery?.removeEventListener?.("change", measure); };
   }, [onCartWindowChange]);
 
   useLayoutEffect(() => {
@@ -196,7 +218,11 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   const availableStock = (product) => product?.defectId || isDefectSale
     ? availableDefectStock(product, product.defectId)
     : Math.max(0, Number(product?.stock || 0) - actualDefectiveStock(product) - Number(reservedStock.good?.[String(product?.id)] || 0));
-  const findInsufficientCartItem = (items, products, reservations) => {
+  // Sotuvda yaroqli tovarni ombordagi qoldiqdan ko'p sotish mumkin: yetmagan qismi qo'shnidan olinadi
+  // va "Qarzdagi tovar" bo'limiga yoziladi. Buyurtma (band qilish) va brak sotuvida cheklov saqlanadi.
+  const allowBorrow = !orderMode;
+  const ownAvailableStock = (product, reservations) => Math.max(0, Number(product?.stock || 0) - actualDefectiveStock(product) - Number(reservations?.good?.[String(product?.id)] || 0));
+  const findInsufficientCartItem = (items, products, reservations, borrow = false) => {
     const requested = new Map();
     items.forEach((item) => {
       const defective = Boolean(item.isDefectSale || item.defectId), key = JSON.stringify([defective ? "defective" : "good", String(item.id), defective ? String(item.defectId || "") : ""]);
@@ -205,6 +231,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       requested.set(key, entry);
     });
     return [...requested.values()].find((item) => {
+      if (borrow && !item.defective) return false;
       const product = products.find((entry) => String(entry.id) === String(item.id));
       const available = item.defective
         ? availableDefectStock(product, item.defectId, reservations)
@@ -392,6 +419,26 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     return matchSearch && matchSelect && saleMatchesProduct({ items: [p] }, productList, categoryFilter);
   }).sort((a, b) => a.name.localeCompare(b.name, "uz", { sensitivity: "base", numeric: true }));
 
+  /* Bazada bir xil mahsulot (nomi + SKU + brend bir xil) bir necha qator bo'lib qolgan bo'lsa,
+     POS'da faqat bittasi ko'rinsin: qoldig'i bor qatorlar ko'rsatiladi, tugaganlari yashiriladi.
+     Hammasi tugagan bo'lsa — bitta "Tugagan" kartasi qoladi. */
+  const productDuplicateKey = (p) => [p.name, p.sku, p.brand].map(normalizeProductText).join("|");
+  const visibleProducts = isDefectSale ? filtered : (() => {
+    const groups = new Map();
+    filtered.forEach((p) => {
+      const key = productDuplicateKey(p);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    });
+    const keep = new Set();
+    groups.forEach((items) => {
+      const inStock = items.filter((p) => availableStock(p) > 0 || cart.some((c) => String(c.id) === String(p.id) && !c.defectId));
+      if (inStock.length) inStock.forEach((p) => keep.add(p));
+      else keep.add(items.reduce((best, p) => (Number(p.stock || 0) > Number(best.stock || 0) ? p : best), items[0]));
+    });
+    return filtered.filter((p) => keep.has(p));
+  })();
+
   const assignUnassignedItems = (addressId) => {
     setCart((previous) => previous.map((item) =>
       item.addressId
@@ -508,6 +555,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
     for (const line of lines) {
       const defectLine = Boolean(line.product?.defectId);
+      if (allowBorrow && !defectLine) continue;
       const available = availableStock(line.product);
       if (available <= 0) {
         warning("Mahsulot tugagan", `${line.product.name} hozir omborda mavjud emas.`);
@@ -577,7 +625,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       const otherQty = previous
         .filter((item) => item.id === current.id && (current.isDefectSale ? item.defectId === current.defectId : !item.isDefectSale) && item.cartKey !== cartKey)
         .reduce((sum, item) => sum + item.qty, 0);
-      const available = product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
+      const available = allowBorrow && !current.isDefectSale ? Infinity : product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
       const nextQty = Math.max(0, Math.min(current.qty + delta, available));
       return previous
         .map((item) => item.cartKey === cartKey ? { ...item, qty: nextQty } : item)
@@ -597,7 +645,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       const otherQty = previous
         .filter((item) => item.id === current.id && (current.isDefectSale ? item.defectId === current.defectId : !item.isDefectSale) && item.cartKey !== cartKey)
         .reduce((sum, item) => sum + item.qty, 0);
-      const available = product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
+      const available = allowBorrow && !current.isDefectSale ? Infinity : product ? (current.isDefectSale ? availableDefectStock(product, current.defectId) : availableStock(product)) - otherQty : Infinity;
       const nextQty = Math.max(0, Math.min(newQty, available));
       return previous
         .map((item) => item.cartKey === cartKey ? { ...item, qty: nextQty } : item)
@@ -1036,7 +1084,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
     if (!paymentOpen || paymentComplete || paymentSubmittingRef.current || cart.length === 0) return;
     const currentProducts = getProducts();
     const currentReservations = readReservedQuantitiesByCondition(activeReservationOrderId);
-    const insufficient = findInsufficientCartItem(cart, currentProducts, currentReservations);
+    const insufficient = findInsufficientCartItem(cart, currentProducts, currentReservations, allowBorrow);
     if (insufficient) { setProductList(currentProducts); setPaymentError(`${insufficient.name}: band qilinmagan mahsulot yetarli emas. Miqdorni kamaytiring.`); return; }
     const saleTotal = Math.round(total);
     const reservedOrder = activeReservationOrderId
@@ -1174,6 +1222,32 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       `CHK-${now.getTime()}`;
 
     /* =================================================
+       QO'SHNIDAN OLINGAN (ПЕРЕХОД) TOVARLAR
+       Omborda yetmagan miqdor qo'shnidan olinadi. Chekka yozilmaydi — faqat "Qarzdagi tovar" bo'limida ko'rinadi.
+    ================================================= */
+
+    const borrowedByProduct = new Map();
+    const borrowedItems = [];
+    if (allowBorrow) {
+      const normalQtyByProduct = new Map();
+      cart.filter((item) => !item.isDefectSale).forEach((item) => normalQtyByProduct.set(String(item.id), (normalQtyByProduct.get(String(item.id)) || 0) + Number(item.qty || 0)));
+      normalQtyByProduct.forEach((quantity, productId) => {
+        const product = currentProducts.find((entry) => String(entry.id) === productId);
+        const borrowed = Math.max(0, quantity - ownAvailableStock(product, currentReservations));
+        if (!borrowed) return;
+        borrowedByProduct.set(productId, borrowed);
+        const line = cart.find((item) => String(item.id) === productId && !item.isDefectSale);
+        const unitCost = Number(product?.cost || 0);
+        borrowedItems.push({
+          id: `PER-${now.getTime()}-${borrowedItems.length + 1}`,
+          productId: product?.id ?? line?.id, productName: product?.name || line?.name || "", sku: product?.sku || "", brand: product?.brand || "", category: product?.category || "",
+          unit: product?.measurementUnit || "dona", quantity: borrowed, soldQuantity: quantity, unitCost, total: borrowed * unitCost, salePrice: Number(line?.price || 0),
+          status: "open", paidAmount: 0, payments: [], note: "", date: now.toISOString(),
+        });
+      });
+    }
+
+    /* =================================================
        SALE OBJECT
     ================================================= */
 
@@ -1251,6 +1325,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
       formattedDate:
         now.toLocaleString("uz-UZ"),
+      ...(borrowedItems.length ? { borrowedItems } : {}),
     };
 
     /* =================================================
@@ -1288,7 +1363,8 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       const defectLines = productLines.filter((item) => item.isDefectSale);
       const normalQuantity = productLines.filter((item) => !item.isDefectSale).reduce((sum, item) => sum + Number(item.qty), 0);
       const defectiveQuantity = defectLines.reduce((sum, item) => sum + Number(item.qty), 0);
-      if (!defectiveQuantity) return { ...p, stock: Math.max(0, Number(p.stock) - normalQuantity) };
+      const borrowedQuantity = borrowedByProduct.get(String(p.id)) || 0;
+      if (!defectiveQuantity) return { ...p, stock: Math.max(0, Number(p.stock) - (normalQuantity - borrowedQuantity)) };
       const soldByDefect = new Map();
       defectLines.forEach((item) => soldByDefect.set(String(item.defectId), (soldByDefect.get(String(item.defectId)) || 0) + Number(item.qty)));
       const updatedDefects = (Array.isArray(p.defects) ? p.defects : []).map((defect, index) => {
@@ -1299,7 +1375,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
       }).filter((defect) => Number(defect.quantity) > 0);
       return {
         ...p,
-        stock: Math.max(0, Number(p.stock) - purchasedQty),
+        stock: Math.max(0, Number(p.stock) - (purchasedQty - borrowedQuantity)),
         defectiveStock: Math.max(0, Number(p.defectiveStock || 0) - defectiveQuantity),
         defects: updatedDefects,
       };
@@ -1463,10 +1539,11 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
   ===================================================== */
 
   return (
-    <div className="pos-container pos-split-layout">
+    <div ref={posContainerRef} className={`pos-container pos-split-layout${compactCart ? " pos-compact" : ""}`}>
       {quickAddProduct && (
         <ProductQuickAddModal
           product={{ ...quickAddProduct, stock: availableStock(quickAddProduct) }}
+          allowBeyondStock={allowBorrow && !isDefectSale && !quickAddProduct.defectId}
           suppliers={suppliers}
           quantity={quickAddQuantity}
           onQuantityChange={setQuickAddQuantity}
@@ -1540,7 +1617,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
         <div className="pos-products-grid" ref={productsGridRef} tabIndex={0} aria-label={tx("Mahsulotlar ro'yxati")}>
 
-          {filtered.length === 0 ? (
+          {visibleProducts.length === 0 ? (
             <div className="pos-no-results">
 
               <FiSearch size={30} />
@@ -1549,7 +1626,7 @@ export default function POS({ cartWindowOpen = false, onCartWindowChange, draftK
 
             </div>
           ) : (
-            filtered.map((p) => {
+            visibleProducts.map((p) => {
 
               const inCart =
                 cart.find(

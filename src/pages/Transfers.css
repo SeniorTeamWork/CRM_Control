@@ -1,0 +1,9 @@
+/* "Переход" jadvali: ustunlar orasidagi bo'sh joy qisqa, ortiqcha joy oxirgi ustunga ketadi. */
+.transfers-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: collapse; }
+.transfers-table th,
+.transfers-table td { width: 1%; white-space: nowrap; padding: 10px 14px !important; vertical-align: middle; }
+.transfers-table th:last-child,
+.transfers-table td:last-child { width: auto; }
+.transfers-table td:nth-child(4) { white-space: normal; min-width: 140px; max-width: 260px; }
+.transfers-table td:nth-child(5),
+.transfers-table td:nth-child(8) { white-space: nowrap; min-width: 0; }

@@ -56,6 +56,9 @@ const state = {
   asosiyId: null,
   tenantMode: false,
   tenantId: "",
+  // Super Admin qatori Supabase'dan muvaffaqiyatli tekshirildimi va topildimi.
+  superAdminChecked: false,
+  superAdminFound: false,
   activeDokonId: null,
   memory: new Map(),
   listeners: new Map(),
@@ -205,6 +208,9 @@ export function useDataVersion() {
 
 export const activeDokonId = () => (state.mode === "supabase" ? state.activeDokonId : null);
 export const isDryRun = () => DRY_RUN;
+// Super Admin hisobini yaratishga ruxsat: faqat birinchi o'rnatishda (hisob ham, mijoz do'konlari ham yo'q bo'lsa).
+// Supabase'ga ulanib, hisob borligini tekshira olmagan bo'lsak — yaratishga ruxsat yo'q.
+export const superAdminSetupState = () => ({ supabase: state.mode === "supabase", checked: state.superAdminChecked, found: state.superAdminFound });
 
 /* ---------------- O'zgarishlarni kuzatish ---------------- */
 
@@ -862,6 +868,8 @@ async function hydrateAdmin(dokonlar, { refresh = false } = {}) {
       if (!blockedTables().includes("super_admin")) {
         const data = await call(markaz.from("super_admin").select("*").eq("id", 1).limit(1));
         superRow = data[0] || null;
+        state.superAdminChecked = true;
+        state.superAdminFound = Boolean(superRow);
       }
     } catch (error) {
       if (error?.transient) throw error;

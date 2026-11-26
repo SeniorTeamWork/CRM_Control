@@ -27,6 +27,7 @@ import { downloadCsv } from "../utils/csv";
 import { formatCurrency, moneyInputValue, toBaseMoney } from "../data/currency";
 import { reservedQuantities } from "../data/ordersStore";
 import { getProducts, saveProducts } from "../supabase/bolimlar/mahsulotlar";
+import { findSameNameProduct, findSkuOwner, productLabel, skuTakenMessage } from "../data/productIdentity";
 import { getSuppliers } from "../supabase/bolimlar/taminotchilar";
 
 const decimalStockUnits = new Set(["metr", "meter", "m", "santimetr", "sm", "cm", "millimetr", "mm", "kilometr", "km", "kilogramm", "kg", "gramm", "g", "milligramm", "mg", "litr", "l", "millilitr", "ml"]);
@@ -281,6 +282,8 @@ export default function Products({ onNavigate }) {
      SAVE
   ===================================================== */
 
+  const liveSkuOwner = (!editingProduct || String(formData.sku ?? "").trim().toLocaleLowerCase("uz-UZ") !== String(editingProduct.sku ?? "").trim().toLocaleLowerCase("uz-UZ"))
+    && findSkuOwner(productList, { sku: formData.sku, name: formData.name, brand: formData.brand, excludeId: editingProduct?.id });
   const handleSaveProduct = (e) => {
     e.preventDefault();
 
@@ -288,6 +291,19 @@ export default function Products({ onNavigate }) {
       !formData.name.trim() ||
       !formData.price
     ) {
+      return;
+    }
+
+    // Bir ID raqami (SKU) faqat bitta mahsulotga; bir xil nom + brendli mahsulot ikki marta bo'lmaydi.
+    const changed = (key) => !editingProduct || String(formData[key] ?? "").trim().toLocaleLowerCase("uz-UZ") !== String(editingProduct[key] ?? "").trim().toLocaleLowerCase("uz-UZ");
+    const skuOwner = changed("sku") && findSkuOwner(productList, { sku: formData.sku, name: formData.name, brand: formData.brand, excludeId: editingProduct?.id });
+    if (skuOwner) {
+      error("ID raqami band", skuTakenMessage(String(formData.sku).trim(), skuOwner));
+      return;
+    }
+    const sameProduct = (changed("name") || changed("brand")) && findSameNameProduct(productList, { name: formData.name, brand: formData.brand, excludeId: editingProduct?.id });
+    if (sameProduct) {
+      error("Mahsulot allaqachon mavjud", `"${productLabel(sameProduct)}" bazada bor. Yangi kirimni shu mahsulotga qo'shing.`);
       return;
     }
 
@@ -1024,6 +1040,8 @@ export default function Products({ onNavigate }) {
                     }
                     placeholder={tx("SKU-1001")}
                     className="input-base font-mono"
+                    aria-invalid={Boolean(liveSkuOwner)}
+                    style={liveSkuOwner ? { borderColor: "var(--danger)", background: "var(--danger-light)", color: "var(--danger)" } : undefined}
                   />
 
                 </div>

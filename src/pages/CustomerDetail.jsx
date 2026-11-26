@@ -2,6 +2,7 @@ import { formatCardNumber, resolveReceivingCard } from "../data/directorCards";
 import { returnKeyFor, returnedQuantityFor } from './customerDetailHelpers';
 import { SaleProductList, uniqueSaleProductCount } from './CustomerSaleProducts';
 import { DebtPaymentModal } from './CustomerDebtPaymentModal';
+import { CustomerGeneralPayModal, CustomerHistoryTab, buildCustomerHistory } from './CustomerHistory';
 import { translateText as tx } from "../locales/translateText";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import "./CustomerDetail.css";
@@ -21,11 +22,10 @@ import {
   ShoppingBag,
   DollarSign,
   CreditCard,
-  TrendingUp,
+  Trash2,
   Edit2,
   CheckCircle,
   Copy,
-  Clock,
   X,
   Save,
   RotateCcw,
@@ -166,6 +166,8 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
     ? debtSales.reduce((sum, sale) => sum + sale.debtBalance, 0)
     : Number(customer.debt || 0);
   const [paymentModalSale, setPaymentModalSale] = useState(null);
+  const [generalPayOpen, setGeneralPayOpen] = useState(false);
+  const [deleteCustomerOpen, setDeleteCustomerOpen] = useState(false);
   const paymentSale = paymentModalSale || activeDebtSale || (debtSales.length === 1 ? debtSales[0] : null);
   const renderDebtPurchaseCard = (sale, selected = false) => {
     const items = Array.isArray(sale.items) ? sale.items : [];
@@ -507,6 +509,69 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
   };
 
   // =========================
+  // UMUMIY QARZNI YOPISH: summa eng eski xariddan boshlab taqsimlanadi,
+  // har bir qism o'z xaridining qarz to'lovi bo'lib yoziladi (bitta groupId bilan).
+  // =========================
+  const payGeneralDebt = ({ amount, method, cardId }) => {
+    const total = Math.min(debtAmount, Number(amount) || 0);
+    if (total <= 0) return false;
+    let receivingCard = null;
+    if (method === "card") {
+      try { receivingCard = resolveReceivingCard(cardId); } catch (cause) { error(tx(cause.message)); return false; }
+    }
+    const now = new Date().toISOString(), groupId = `GEN-${Date.now()}`;
+    let rest = total, latest = paymentRecords;
+    try {
+      [...debtSales].sort((a, b) => new Date(a.createdAt || a.date || 0) - new Date(b.createdAt || b.date || 0)).forEach((sale) => {
+        if (rest <= 0) return;
+        const part = Math.min(rest, Number(sale.debtBalance || 0));
+        if (part <= 0) return;
+        rest -= part;
+        latest = saveDebtPayment({
+          id: `${groupId}-${sale.id}`, saleId: sale.id, customer: customer.name, amount: part,
+          method: method === "card" ? "Karta" : "Naqd", receivingCard, cardLast4: receivingCard?.number.slice(-4) || "",
+          createdAt: now, groupId, groupTotal: total,
+        });
+      });
+    } catch {
+      error("To'lov saqlanmadi", "Qayta urinib ko'ring.");
+      setPaymentRecords(readDebtPayments());
+      return false;
+    }
+    setPaymentRecords(latest);
+    const remainingDebt = Math.max(0, debtAmount - total);
+    setCustomer((prev) => ({ ...prev, debt: remainingDebt, status: remainingDebt > 0 ? "debtor" : prev.status === "debtor" ? "active" : prev.status }));
+    try {
+      const saved = getCustomers(undefined, null);
+      const list = Array.isArray(saved) ? saved : [];
+      saveCustomers(list.map((item) => item.name?.trim().toLowerCase() === customer.name.trim().toLowerCase()
+        ? { ...item, debt: remainingDebt, status: remainingDebt > 0 ? "debtor" : item.status === "debtor" ? "active" : item.status }
+        : item));
+    } catch { /* To'lov saqlandi; mijozlar ro'yxati keyin yangilanadi. */ }
+    success("Umumiy qarz to'landi", `${customer.name} — ${formatCurrency(total)} · ${tx("Qolgan qarz")}: ${formatCurrency(remainingDebt)}`);
+    return true;
+  };
+
+  // Mijoz hisobini o'chirish (tasdiqlashdan keyin). Sotuvlar tarixi saqlanib qoladi.
+  const deleteCustomer = () => {
+    if (debtAmount > 0) return; // Qarzi to'lanmaguncha mijozni o'chirib bo'lmaydi.
+    try {
+      const saved = getCustomers(undefined, null);
+      const list = Array.isArray(saved) ? saved : [];
+      const sameCustomer = (item) => customer.id != null && item.id != null
+        ? String(item.id) === String(customer.id)
+        : item.name?.trim().toLowerCase() === customer.name.trim().toLowerCase();
+      saveCustomers(list.filter((item) => !sameCustomer(item)));
+    } catch {
+      error("Mijoz o'chirilmadi", "Qayta urinib ko'ring.");
+      return;
+    }
+    setDeleteCustomerOpen(false);
+    success("Mijoz o'chirildi", customer.name);
+    onBack?.();
+  };
+
+  // =========================
   // EDIT MODAL OPEN
   // =========================
   const handleOpenEdit = () => {
@@ -555,67 +620,18 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
     },
     {
       key: "payments",
-      label: "To'lovlar",
+      label: "To'lovlar tarixi",
     },
     {
       key: "activity",
-      label: "Faoliyat",
+      label: "Umumiy tarix",
     },
     {
       key: "returns",
       label: "Qaytarilgan tovarlar",
     },
   ];
-  const recordedPayments = paymentRecords
-    .filter((payment) => profileSales.some((sale) => sale.id === payment.saleId))
-    .map((payment) => ({
-      ...payment,
-      isDebtPayment: true,
-      date: payment.createdAt,
-      method: payment.receivingCard ? `${tx("Karta")} ${formatCardNumber(payment.receivingCard.number)}` : payment.cardLast4 ? `Karta •••• ${payment.cardLast4}` : payment.method,
-    }));
-  const initialPayments = profileSales
-    .filter((sale) => Number(sale.initialPaidAmount || 0) > 0)
-    .map((sale) => ({
-      id: `sale-payment-${sale.id}`,
-      saleId: sale.id,
-      amount: Number(sale.initialPaidAmount),
-      method: sale.receivingCard ? `${tx("Karta")} ${formatCardNumber(sale.receivingCard.number)}` : sale.payment || "Naqd",
-      date: sale.date,
-      createdAt: sale.date,
-      isDebtPayment: false,
-    }));
-  const displayedPayments = [...recordedPayments, ...initialPayments];
-  const displayedActivity = [
-    ...profileSales.map((sale) => ({
-      type: "sale",
-      text: `${tx("Yangi sotuv amalga oshirildi")} — ${formatCurrency(sale.amount)}`,
-      time: sale.date,
-      icon: ShoppingBag,
-      color: "var(--brand)",
-    })),
-    ...displayedPayments.map((payment) => ({
-      type: "payment",
-      text: `${tx(payment.isDebtPayment ? "Qarz to'lovi qabul qilindi" : "To'lov qabul qilindi")} — ${formatCurrency(payment.amount)} (${payment.saleId})`,
-      time: payment.date,
-      icon: CheckCircle,
-      color: "var(--success)",
-    })),
-    ...customerReturns.map((record) => ({
-      type: "return",
-      text: `${tx("Mijoz tovarni qaytardi")} — ${formatCurrency(record.amount)} (${record.product || tx("Mahsulot")})`,
-      time: record.date,
-      icon: RotateCcw,
-      color: "var(--danger)",
-    })),
-    ...profileSales.filter((sale) => Number(sale.debtBalance || 0) > 0).map((sale) => ({
-      type: "debt",
-      text: `${tx("Qarzdorlik yaratildi")} — ${formatCurrency(sale.debtBalance)} (${sale.id})`,
-      time: sale.date,
-      icon: CreditCard,
-      color: "var(--danger)",
-    })),
-  ];
+  const customerPaymentRecords = paymentRecords.filter((payment) => profileSales.some((sale) => String(sale.id) === String(payment.saleId)));
 
   return (
     <div className="space-y-6 fade-in">
@@ -680,7 +696,17 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
         <div className="customer-detail-summary space-y-4">
 
           {/* PROFILE CARD */}
-          <div className="card p-5 text-center">
+          <div className="card p-5 text-center" style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setDeleteCustomerOpen(true)}
+              aria-label={tx("Mijozni o'chirish")}
+              title={tx("Mijozni o'chirish")}
+              className="flex items-center justify-center rounded-xl"
+              style={{ position: "absolute", top: 14, right: 14, width: 38, height: 38, border: "1px solid var(--danger-border, var(--danger))", background: "var(--danger-light)", color: "var(--danger)", cursor: "pointer" }}
+            >
+              <Trash2 size={17} />
+            </button>
 
             <div className="relative inline-block mb-4">
               <div
@@ -866,14 +892,12 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                     : "var(--success-light)",
               },
               {
-                icon: TrendingUp,
-                label: "O'rtacha xarid",
-                value: formatCurrency(Math.round(
-                  customerSpentAfterReturns /
-                  Math.max(profileSales.length, 1)
-                )),
-                color: "var(--violet)",
-                bg: "var(--violet-light)",
+                icon: CheckCircle,
+                label: "To'langan",
+                // Shu paytgacha mijoz bizga to'lagan jami summa (xarid paytida + qarz to'lovlari).
+                value: formatCurrency(profileSales.reduce((sum, sale) => sum + Number(sale.paidAmount || 0), 0)),
+                color: "var(--success)",
+                bg: "var(--success-light)",
               },
             ].map((s) => (
               <div
@@ -1217,7 +1241,7 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                         <ArrowLeft size={16} />{tx(" Orqaga")}</button>
                     )}
                     {!activeDebtSale && <div
-                      className="p-4 rounded-2xl"
+                      className="p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3"
                       style={{
                         background:
                           "var(--danger-light)",
@@ -1225,6 +1249,7 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                           "1px solid var(--danger-border, var(--danger))",
                       }}
                     >
+                      <div>
                       <div
                         className="text-sm font-semibold mb-1"
                         style={{
@@ -1243,6 +1268,8 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
                         }}
                       >
                         {formatCurrency(debtAmount)}</div>
+                      </div>
+                      <button type="button" className="btn-primary" style={{ marginLeft: "auto" }} onClick={() => setGeneralPayOpen(true)}><CreditCard size={16} />{tx("Umumiy qarzni yopish")}</button>
                     </div>}
 
                     {activeDebtSale ? (
@@ -1352,153 +1379,15 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
               </div>
             )}
 
-            {/* PAYMENTS */}
-            {tab === "payments" && (
-              <div className="p-5">
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="p-4 rounded-xl" style={{ background: "var(--brand-light)", color: "var(--brand)" }}>
-                    <span className="text-xs">{tx("To‘lovlar soni")}</span>
-                    <b className="block text-xl mt-1">{displayedPayments.length}</b>
-                  </div>
-                  <div className="p-4 rounded-xl" style={{ background: "var(--success-light)", color: "var(--success)" }}>
-                    <span className="text-xs">{tx("Jami to‘langan")}</span>
-                    <b className="block text-lg mt-1">{formatCurrency(displayedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0))}</b>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {displayedPayments.map((p) => (
-                    <button
-                      type="button"
-                      key={p.id}
-                      onClick={() => setSelectedPayment(p)}
-                      className="w-full flex items-center justify-between p-4 rounded-xl text-left transition-all hover:opacity-80"
-                      style={{
-                        background:
-                          "var(--surface-2)",
-                        border:
-                          "1px solid var(--border-subtle)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-9 h-9 rounded-xl flex items-center justify-center"
-                          style={{
-                            background:
-                              "var(--success-light)",
-                          }}
-                        >
-                          <CheckCircle
-                            size={16}
-                            style={{
-                              color:
-                                "var(--success)",
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <div
-                            className="text-sm font-semibold"
-                            style={{
-                              color:
-                                "var(--text-primary)",
-                            }}
-                          >
-                            {formatCurrency(p.amount)}</div>
-
-                          <div
-                            className="text-xs"
-                            style={{
-                              color:
-                                "var(--text-faint)",
-                            }}
-                          >
-                            {tx(p.method)} · {new Date(p.date).toLocaleString("uz-UZ", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}{tx(p.saleId ? ` · ${p.saleId}` : "")}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span
-                        className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                        style={{
-                          background:
-                            "var(--success-light)",
-                          color:
-                            "var(--success)",
-                        }}
-                      >{tx("Batafsil")}</span>
-                    </button>
-                  ))}
-                  {!displayedPayments.length && <div className="py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>{tx("To‘lovlar hali mavjud emas")}</div>}
-                </div>
-              </div>
-            )}
-
-            {/* ACTIVITY */}
-            {tab === "activity" && (
-              <div className="p-5">
-                <div className="relative pl-6 space-y-0">
-
-                  <div
-                    className="absolute left-2.5 top-4 bottom-4 w-0.5"
-                    style={{
-                      background:
-                        "var(--border)",
-                    }}
-                  />
-
-                  {displayedActivity.map((item, i) => (
-                    <div
-                      key={i}
-                      className="relative pb-5"
-                    >
-                      <div
-                        className="absolute left-[-22px] w-5 h-5 rounded-full flex items-center justify-center"
-                        style={{
-                          background: item.color,
-                          top: 2,
-                        }}
-                      >
-                        <item.icon
-                          size={10}
-                          color="white"
-                        />
-                      </div>
-
-                      <div
-                        className="text-sm font-medium"
-                        style={{
-                          color:
-                            "var(--text-primary)",
-                        }}
-                      >
-                        {tx(item.text)}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <Clock
-                          size={11}
-                          style={{
-                            color:
-                              "var(--text-faint)",
-                          }}
-                        />
-
-                        <span
-                          className="text-xs"
-                          style={{
-                            color:
-                              "var(--text-faint)",
-                          }}
-                        >
-                          {tx(item.time)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* TO'LOVLAR TARIXI va UMUMIY TARIX */}
+            {(tab === "payments" || tab === "activity") && (
+              <CustomerHistoryTab
+                key={tab}
+                mode={tab === "payments" ? "payments" : "all"}
+                events={buildCustomerHistory({ sales: profileSales, payments: customerPaymentRecords, returns: groupedCustomerReturns })}
+                allPayments={customerPaymentRecords}
+                onOpenSale={(sale) => { setDebtDetailSaleId(null); setPurchaseDetailSaleId(sale.id); setTab("purchases"); }}
+              />
             )}
           </div>
         </div>
@@ -1669,6 +1558,44 @@ export default function CustomerDetail({ customerId, saleCustomer, onBack, onNav
       {/* =====================================================
           PAYMENT MODAL
       ===================================================== */}
+      {deleteCustomerOpen && debtAmount > 0 && modalRoot && createPortal(
+        <div className="crm-content-modal" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setDeleteCustomerOpen(false); }}>
+          <style>{`@keyframes customerDebtBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.25;transform:scale(.92)}}`}</style>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="customer-debt-block-title" className="slide-up" style={{ width: "min(440px, calc(100vw - 32px))", borderRadius: 20, overflow: "hidden", background: "var(--surface)", border: "2px solid var(--danger)", boxShadow: "0 24px 60px rgba(220, 38, 38, 0.25)" }}>
+            <div style={{ background: "var(--danger)", color: "#fff", padding: "22px 20px", textAlign: "center" }}>
+              <div style={{ width: 64, height: 64, margin: "0 auto 10px", borderRadius: "50%", background: "rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, fontWeight: 800, lineHeight: 1, animation: "customerDebtBlink 1s ease-in-out infinite" }} aria-hidden="true">!</div>
+              <h2 id="customer-debt-block-title" style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{tx("Mijozni o'chirib bo'lmaydi")}</h2>
+            </div>
+            <div style={{ padding: 20 }} className="space-y-4">
+              <p className="text-sm" style={{ color: "var(--text-primary)" }}>{tx("Bu mijozning to'lanmagan qarzi bor. Qarzi to'liq to'lanmaguncha mijoz profilini o'chirib bo'lmaydi.")}</p>
+              <div className="p-3 rounded-xl text-sm" style={{ background: "var(--danger-light)", color: "var(--danger)" }}>
+                <b className="block">{customer.name}</b>
+                <span className="block mt-1">{tx("Joriy qarz")}: <b>{formatCurrency(debtAmount)}</b></span>
+              </div>
+              <div className="flex justify-end gap-2 flex-wrap">
+                <button type="button" className="btn-ghost" onClick={() => setDeleteCustomerOpen(false)}>{tx("Bekor qilish")}</button>
+                <button type="button" className="btn-primary" style={{ background: "var(--danger)", borderColor: "var(--danger)" }} onClick={() => { setDeleteCustomerOpen(false); setDebtDetailSaleId(null); setTab("debt"); }}><CreditCard size={15} />{tx("Qarzini to'lash")}</button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        modalRoot
+      )}
+      <Modal contentOnly open={deleteCustomerOpen && debtAmount <= 0} onClose={() => setDeleteCustomerOpen(false)} title="Mijozni o'chirish" subtitle={customer.name} icon={Trash2} width={440}>
+        <div className="space-y-4">
+          <p className="text-sm">{tx("Rostdan ham bu mijozning hisobini o'chirmoqchimisiz?")}</p>
+          <div className="p-3 rounded-xl text-sm" style={{ background: "var(--danger-light)", color: "var(--danger)" }}>
+            <b className="block">{customer.name}</b>
+            {debtAmount > 0 && <span className="block mt-1">{tx("Joriy qarz")}: {formatCurrency(debtAmount)}</span>}
+            <span className="block mt-1">{tx("Bu amalni ortga qaytarib bo'lmaydi.")}</span>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setDeleteCustomerOpen(false)}>{tx("Yo'q, bekor qilish")}</button>
+            <button type="button" className="btn-primary" style={{ background: "var(--danger)", borderColor: "var(--danger)" }} onClick={deleteCustomer}><Trash2 size={15} />{tx("Ha, o'chirish")}</button>
+          </div>
+        </div>
+      </Modal>
+      <CustomerGeneralPayModal open={generalPayOpen} close={() => setGeneralPayOpen(false)} customerName={customer.name} debtSales={debtSales} totalDebt={debtAmount} onPay={payGeneralDebt} />
       {showPaymentModal && paymentSale && modalRoot && createPortal(
         <DebtPaymentModal
           sale={paymentSale}
