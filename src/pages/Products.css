@@ -1188,3 +1188,34 @@
   width: max(100%, 240px);
   max-width: calc(100vw - 32px);
 }
+@media (max-width: 700px) {
+  .products-header-action-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    flex: 0 0 min(58%, 220px);
+    width: min(58%, 220px);
+    gap: 8px;
+  }
+
+  .products-header-action-buttons > button {
+    box-sizing: border-box;
+    display: inline-flex;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 7px;
+    font-size: 10px;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .products-header-action-buttons > button svg {
+    flex: 0 0 auto;
+  }
+}

@@ -234,7 +234,7 @@ export default function Finance() {
       if (!groups[item.category]) groups[item.category] = { name: item.category, value: 0, color: colors.get(item.category) || ["#f59e0b", "#8b5cf6", "#06b6d4"][index % 3] };
       groups[item.category].value += Number(item.amount || 0);
       return groups;
-    }, {}));
+    }, {})).filter((category) => category.value > 0);
   })();
   const monthKey = (offset = 0) => { const date = new Date(); date.setMonth(date.getMonth() + offset); return date.toISOString().slice(0, 7); };
   const monthTotal = (items, key) => items.filter((item) => String(item.date || "").startsWith(key)).reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -520,48 +520,68 @@ export default function Finance() {
               color: "var(--text-primary)",
             }}
           >{tx("Xarajatlar tarkibi")}</h2>
-          <ResponsiveContainer width="100%" height={160}>
-            <PieChart>
-              <Pie
-                data={currentExpenseCategories}
-                cx="50%"
-                cy="50%"
-                innerRadius={45}
-                outerRadius={70}
-                dataKey="value"
-                paddingAngle={3}
-              >
-                {currentExpenseCategories.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(v, name) => [formatCurrency(Number(v)), tx(name)]} labelFormatter={(value) => tx(value)} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-2 mt-2">
-            {currentExpenseCategories.map((cat) => (
-              <div key={cat.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ background: cat.color }}
-                  />
-                  <span
-                    className="text-xs"
-                    style={{ color: "var(--text-muted)" }}
+          {currentExpenseCategories.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie
+                    data={currentExpenseCategories}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={70}
+                    dataKey="value"
+                    paddingAngle={3}
                   >
-                    {tx(cat.name)}
-                  </span>
-                </div>
-                <span
-                  className="text-xs font-semibold"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {formatCurrency(cat.value)}
-                </span>
+                    {currentExpenseCategories.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v, name) => [formatCurrency(Number(v)), tx(name)]} labelFormatter={(value) => tx(value)} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-2 mt-2">
+                {currentExpenseCategories.map((cat) => (
+                  <div key={cat.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ background: cat.color }}
+                      />
+                      <span
+                        className="text-xs"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {tx(cat.name)}
+                      </span>
+                    </div>
+                    <span
+                      className="text-xs font-semibold"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {formatCurrency(cat.value)}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
+              <div
+                className="mb-3 flex h-20 w-20 items-center justify-center rounded-full"
+                style={{ border: "12px solid var(--surface-2)", color: "var(--text-faint)" }}
+                aria-hidden="true"
+              >
+                <DollarSign size={21} />
+              </div>
+              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                {tx("Hozircha xarajatlar yo‘q")}
+              </p>
+              <p className="mt-1 max-w-xs text-xs" style={{ color: "var(--text-muted)" }}>
+                {tx("Xarajatlar qo‘shilganda tarkibi shu yerda ko‘rinadi")}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

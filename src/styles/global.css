@@ -1217,6 +1217,7 @@ body {
 .app-page-content .card {
   border-color: var(--border);
   box-shadow: var(--shadow-xs);
+  padding: 10px;
 }
 
 .app-page-content .card:hover {

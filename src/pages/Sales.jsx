@@ -366,7 +366,9 @@ export default function Sales({ onNavigate }) {
           </div>
 
           <SalesProductFilter products={productCatalog} value={productFilter} onChange={setProductFilter} />
-          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} applyOnEnter />
+          <div className="sales-date-range">
+            <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} applyOnEnter />
+          </div>
 
           <div className="sales-filters">
 

@@ -325,7 +325,7 @@ export default function Customers({ filter, onNavigate }) {
       {/* Qidiruv va Tablar */}
       <div className="customers-list-card card-flat rounded-2xl overflow-hidden shadow-sm border border-[var(--border-subtle)]">
         <div
-          className="flex items-center gap-3 px-5 py-4 flex-wrap"
+          className="customers-list-toolbar flex items-center gap-3 px-5 py-4 flex-wrap"
           style={{ borderBottom: "1px solid var(--border-subtle)" }}
         >
           <div
@@ -347,7 +347,7 @@ export default function Customers({ filter, onNavigate }) {
           </div>
 
           <div
-            className="flex items-center gap-1 rounded-xl p-1"
+            className="customers-list-tabs flex items-center gap-1 rounded-xl p-1"
             style={{
               background: "var(--surface-2)",
               border: "1px solid var(--border)",

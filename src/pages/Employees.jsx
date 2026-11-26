@@ -3,7 +3,9 @@ import { formatCurrency } from "../data/currency";
 import { useLanguage as useUILanguage } from "../context/LanguageContext";
 import './Employees.css';
 import { useEffect, useState } from "react";
-import { useDataVersion } from "../supabase/db";
+import { subscribeData, useDataVersion } from "../supabase/db";
+import { ADDITIONAL_SALES_KEY, getReturns, RETURNS_KEY, SALES_KEY } from "../supabase/bolimlar/sotuvlar";
+import { readPosSales } from "../data/debtPayments";
 import {
   Search,
   Plus,
@@ -20,6 +22,37 @@ import { ACCESS_SECTIONS, createCredentials, loginExists } from "../data/accessS
 
 const ROLES = ["Admin", "Manager", "Kassir", "Ombor", "Boshqa"];
 const cleanRole = (value) => value.replace(/[^\p{L}\s]/gu, "").replace(/\s+/g, " ").replace(/^\p{L}/u, (letter) => letter.toLocaleUpperCase("uz-UZ"));
+
+const readEmployeeSalesStats = () => {
+  try {
+    const returnedBySale = new Map();
+    const returnRecords = getReturns();
+    (Array.isArray(returnRecords) ? returnRecords : []).forEach((record) => {
+      if (record.status !== "approved" || record.saleId == null) return;
+      const saleId = String(record.saleId);
+      const returnAmount = Number(record.amount || 0);
+      if (Number.isFinite(returnAmount)) returnedBySale.set(saleId, (returnedBySale.get(saleId) || 0) + returnAmount);
+    });
+
+    const stats = new Map();
+    readPosSales().forEach((sale) => {
+      const employeeId = sale.employeeId ?? sale.cashierEmployeeId ?? sale.sellerEmployeeId;
+      if (employeeId == null) return;
+
+      const key = String(employeeId);
+      const current = stats.get(key) || { sales: 0, revenue: 0 };
+      const saleAmount = Number(sale.amount || 0);
+      const amount = Math.max(0, (Number.isFinite(saleAmount) ? saleAmount : 0) - (returnedBySale.get(String(sale.id)) || 0));
+      current.sales += 1;
+      current.revenue += amount;
+      stats.set(key, current);
+    });
+
+    return Object.fromEntries(stats);
+  } catch {
+    return {};
+  }
+};
 
 const roleColors = {
   Admin: {
@@ -46,9 +79,19 @@ export default function Employees({ onNavigate }) {
   const [employees, setEmployees] = useState(() => {
     try { return readEmployees(); } catch { return []; }
   });
+  const [employeeSalesStats, setEmployeeSalesStats] = useState(readEmployeeSalesStats);
   // Boshqa kassir yoki kompyuterda o'zgarsa, Supabase'dan kelgan yangi holat qayta o'qiladi.
   const dataVersion = useDataVersion();
   useEffect(() => { if (dataVersion) { try { setEmployees(readEmployees()); } catch { /* eski ro'yxat qoladi */ } } }, [dataVersion]);
+  useEffect(() => {
+    const refreshSales = () => setEmployeeSalesStats(readEmployeeSalesStats());
+    refreshSales();
+    const unsubscribe = [SALES_KEY, ADDITIONAL_SALES_KEY, RETURNS_KEY].map((key) => subscribeData(key, refreshSales));
+    return () => unsubscribe.forEach((stop) => stop());
+  }, []);
+  useEffect(() => {
+    if (dataVersion) setEmployeeSalesStats(readEmployeeSalesStats());
+  }, [dataVersion]);
   useEffect(() => {
     const refreshEmployees = () => { try { setEmployees(readEmployees()); } catch { /* eski ro'yxat qoladi */ } };
     window.addEventListener("crm-employees-updated", refreshEmployees);
@@ -162,6 +205,9 @@ export default function Employees({ onNavigate }) {
         .toLowerCase()
         .includes(search.toLowerCase())
   );
+  const employeeMetrics = (employee) => employeeSalesStats[String(employee.id)] || { sales: 0, revenue: 0 };
+  const totalSalesCount = employees.reduce((sum, employee) => sum + employeeMetrics(employee).sales, 0);
+  const totalSalesRevenue = employees.reduce((sum, employee) => sum + employeeMetrics(employee).revenue, 0);
 
   return (
     <div className="space-y-6 fade-in">
@@ -225,23 +271,14 @@ export default function Employees({ onNavigate }) {
           },
           {
             label: "Jami sotuvlar",
-            value: employees.reduce(
-              (s, e) => s + e.sales,
-              0
-            ),
+            value: totalSalesCount,
             icon: ShoppingCart,
             color: "var(--violet)",
             bg: "var(--violet-light)",
           },
           {
             label: "Umumiy daromad",
-            value:
-              (
-                employees.reduce(
-                  (s, e) => s + e.revenue,
-                  0
-                ) / 1000000
-              ).toFixed(0) + " mln",
+            value: (totalSalesRevenue / 1000000).toFixed(0) + " mln",
             icon: TrendingUp,
             color: "var(--warning)",
             bg: "var(--warning-light)",
@@ -378,6 +415,7 @@ export default function Employees({ onNavigate }) {
 
             <tbody>
               {filtered.map((e) => {
+                const metrics = employeeMetrics(e);
                 const rc =
                   roleColors[e.role] || {
                     bg:
@@ -459,9 +497,7 @@ export default function Employees({ onNavigate }) {
                           "var(--text-secondary)",
                       }}
                     >
-                      {tx(e.sales > 0
-                        ? e.sales + " ta"
-                        : "—")}
+                      {tx(metrics.sales + " ta")}
                     </td>
 
                     <td
@@ -471,7 +507,7 @@ export default function Employees({ onNavigate }) {
                           "var(--text-primary)",
                       }}
                     >
-                      {e.revenue > 0 ? formatCurrency(e.revenue) : "—"}
+                      {formatCurrency(metrics.revenue)}
                     </td>
 
                     <td className="px-5 py-3.5">

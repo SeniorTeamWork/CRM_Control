@@ -874,7 +874,7 @@ export default function Suppliers({ onNavigate, section = "suppliers" }) {
             onClick={() => { setReturnSupplierQuery(""); setReturnPickerOpen(true); }}
             aria-label={tx("Tovarni qaytarish")}
             title={tx("Tovarni qaytarish")}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-90"
+            className="supplier-return-action-btn flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-90"
             style={{ background: "var(--brand-light)", color: "var(--brand)", border: "1px solid var(--brand)" }}
           >
             <RotateCcw size={16} aria-hidden="true" /><span>{tx("Tovarni qaytarish")}</span>
@@ -1040,7 +1040,9 @@ export default function Suppliers({ onNavigate, section = "suppliers" }) {
               }}
             />
           </div>
-          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+          <div className="suppliers-date-filter">
+            <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+          </div>
         </div>
 
         {/* Table */}

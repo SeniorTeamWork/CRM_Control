@@ -46,9 +46,9 @@
   .usta-list-row > :nth-child(2), .usta-list-row > :nth-child(3), .usta-list-row > :nth-child(4), .usta-list-row > :nth-child(5) { display: none; }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   [data-ustolar-stats="true"] {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.6fr) !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     gap: 8px !important;
   }
 
@@ -67,5 +67,43 @@
 
   [data-ustolar-stats="true"] h2 {
     overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 640px) {
+  .usta-add-button {
+    display: inline-flex;
+    flex: 0 0 44px;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+    gap: 0;
+    padding: 0;
+    border-radius: 13px;
+    box-sizing: border-box;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 24%, transparent);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+
+  .usta-add-button span {
+    display: none;
+  }
+
+  .usta-add-button > svg:first-child {
+    width: 17px;
+    height: 17px;
+  }
+
+  .usta-add-button > svg:nth-child(2) {
+    width: 12px;
+    height: 12px;
+    margin-left: -4px;
+  }
+
+  .usta-add-button:active {
+    transform: scale(.96);
   }
 }

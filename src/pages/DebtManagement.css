@@ -313,6 +313,36 @@
 }
 
 @media (max-width: 700px) {
+  .debt-date-range {
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .debt-date-range > .flex {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .debt-date-range label {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    min-width: 0;
+    line-height: 1.2;
+  }
+
+  .debt-date-range input[type="date"] {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 42px;
+    box-sizing: border-box;
+    padding-inline: 8px;
+  }
+
   .debt-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px;
@@ -488,5 +518,73 @@
 @media (hover: hover) {
   .hover\:opacity-80:hover {
     opacity: 80%;
+  }
+}
+
+/* Mobile debt filter layout: keep search and status tabs compact without overlap. */
+@media (max-width: 700px) {
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap {
+    display: grid !important;
+    grid-template-columns: minmax(0, 0.34fr) minmax(0, 0.66fr);
+    align-items: center;
+    gap: 8px;
+    padding: 12px !important;
+  }
+
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > div:first-child {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 42px;
+    padding: 0 9px;
+    gap: 6px;
+    box-sizing: border-box;
+  }
+
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > div:first-child input {
+    min-width: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > div:nth-child(2) {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 2px;
+    padding: 4px;
+    box-sizing: border-box;
+  }
+
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > div:nth-child(2) button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 5px 1px !important;
+    font-size: 8px;
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .debt-date-range {
+    grid-column: 1 / -1;
+  }
+
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > span {
+    grid-column: 1 / -1;
+    justify-self: end;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .debt-list-card > .flex.items-center.gap-3.px-5.py-4.flex-wrap > div:nth-child(2) button {
+    padding-inline: 0 !important;
+    font-size: 7.5px;
   }
 }

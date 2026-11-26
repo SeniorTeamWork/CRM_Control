@@ -601,7 +601,9 @@ export default function DebtManagement({ onNavigate }) {
             ))}
           </div>
 
-          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+          <div className="debt-date-range">
+            <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+          </div>
 
           <span
             className="text-xs ml-auto"

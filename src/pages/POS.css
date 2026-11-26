@@ -2404,6 +2404,8 @@ main.app-pos-main {
   margin-bottom: 0;
 }
 
+.app-sale-section-picker-trigger { display: none; }
+
 .app-pos-content > .app-back-button + .pos-container .pos-products-section {
   padding-top: 106px;
 }
@@ -2497,6 +2499,28 @@ main.app-pos-main {
 
 @media (max-width: 700px) {
   main.app-pos-main { padding: 10px; }
+  .app-pos-content > .app-sale-section-picker-trigger {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    display: inline-flex;
+    width: 42px;
+    height: 42px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--brand);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+    cursor: pointer;
+    transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .app-pos-content > .app-sale-section-picker-trigger:active {
+    transform: scale(.96);
+    background: var(--brand-light);
+  }
   .app-pos-content > .app-back-button {
     position: static;
     align-self: flex-start;

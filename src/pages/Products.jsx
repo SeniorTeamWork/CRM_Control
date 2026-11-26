@@ -416,7 +416,7 @@ export default function Products({ onNavigate }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 products-header-action-buttons">
 
           <button
             type="button"

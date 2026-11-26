@@ -63,6 +63,7 @@ export default function EmployeeDetail({ employeeId, onBack }) {
   const { success, error } = useToast();
   const modalRoot = document.getElementById("main-modal-root");
   const modalDialogRef = useRef(null);
+  const salaryInputRef = useRef(null);
   const [initial] = useState(() => {
     try { return readEmployees().find((e) => String(e.id) === String(employeeId)) || null; }
     catch { return null; }
@@ -81,7 +82,6 @@ export default function EmployeeDetail({ employeeId, onBack }) {
   const [showDelete, setShowDelete] = useState(false);
   const [salaryForm, setSalaryForm] = useState({ period: monthKey(), paidAt: dateKey(), amount: "" });
   const [salaryError, setSalaryError] = useState("");
-  const [salaryEditing, setSalaryEditing] = useState(false);
 
   useEffect(() => {
     if (!showEdit && !showDelete) return;
@@ -96,6 +96,28 @@ export default function EmployeeDetail({ employeeId, onBack }) {
     return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, [showEdit, showDelete]);
   const [form, setForm] = useState({ name: initial?.name || "", role: initial?.role || "Kassir", phone: initial?.phone || "", status: initial?.status || "active", monthlySalary: initial?.monthlySalary ?? "", salaryDueDay: initial?.salaryDueDay ?? "", salaryStartMonth: initial?.salaryStartMonth || monthKey(), login: initial?.login || "", password: "", permissions: expandEmployeePermissions(initial?.permissions || []) });
+
+  const handleMonthlySalaryChange = (event) => {
+    const input = event.currentTarget;
+    const rawValue = input.value;
+    const cursor = input.selectionStart ?? rawValue.length;
+    const digitsBeforeCursor = (rawValue.slice(0, cursor).match(/\d/g) || []).length;
+    const nextValue = rawValue === "" ? "" : String(toBaseMoney(rawValue));
+    const nextDisplay = moneyInputValue(nextValue, true);
+
+    setForm((current) => ({ ...current, monthlySalary: nextValue }));
+    requestAnimationFrame(() => {
+      const salaryInput = salaryInputRef.current;
+      if (!salaryInput || document.activeElement !== salaryInput) return;
+      let nextCursor = 0;
+      let digitCount = 0;
+      while (nextCursor < nextDisplay.length && digitCount < digitsBeforeCursor) {
+        if (/\d/.test(nextDisplay[nextCursor])) digitCount += 1;
+        nextCursor += 1;
+      }
+      salaryInput.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
 
   if (!data) return <div className="space-y-6 fade-in"><button type="button" onClick={onBack} className="app-back-button"><ArrowLeft size={16} aria-hidden="true" />{tx("Orqaga")}</button><div className="card p-6 text-sm" style={{ color: "var(--text-muted)" }}>{tx("Xodim topilmadi")}</div></div>;
 
@@ -338,11 +360,11 @@ export default function EmployeeDetail({ employeeId, onBack }) {
                   const ps = payStatus[o.status] || payStatus.paid;
                   return (
                     <tr key={o.id} className="border-t table-row-hover" style={{ borderColor: "var(--border-subtle)" }}>
-                      <td className="px-5 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{o.id}</td>
-                      <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{o.customer}</td>
-                      <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{(o.items || []).map((item) => `${item.name || "Mahsulot"} × ${item.qty || item.quantity || 1}`).join(", ") || `${o.products || 0} xil mahsulot`}</td>
-                      <td className="px-5 py-3 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{formatCurrency(o.amount)}</td>
-                      <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{tx(o.payment)}</td>
+                      <td className="px-5 py-3 text-xs font-medium" style={{ color: "var(--text-primary)" }}>{o.id}</td>
+                      <td className="px-5 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{o.customer}</td>
+                      <td className="px-5 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{(o.items || []).map((item) => `${item.name || "Mahsulot"} × ${item.qty || item.quantity || 1}`).join(", ") || `${o.products || 0} xil mahsulot`}</td>
+                      <td className="px-5 py-3 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{formatCurrency(o.amount)}</td>
+                      <td className="px-5 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{tx(o.payment)}</td>
                       <td className="px-5 py-3 text-xs" style={{ color: "var(--text-faint)" }}>{saleDateTime(o.createdAt || o.date)}</td>
                       <td className="px-5 py-3">
                         <span className="px-3 py-1 rounded-full text-xs font-semibold" style={{ background: ps.bg, color: ps.color }}>{tx(ps.label)}</span>
@@ -522,7 +544,7 @@ export default function EmployeeDetail({ employeeId, onBack }) {
               <div>
                 <label htmlFor="employee-monthly-salary" className="block text-xs font-semibold mb-2" style={{ color: "var(--text-secondary)" }}>{tx("Oylik maosh")}</label>
                 <div style={{ position: "relative" }}>
-                  <input id="employee-monthly-salary" className="input-base" type="text" inputMode="numeric" placeholder={tx("Masalan: 3,000,000")} value={moneyInputValue(form.monthlySalary, !salaryEditing)} onFocus={() => setSalaryEditing(true)} onBlur={() => setSalaryEditing(false)} onChange={(e) => setForm({ ...form, monthlySalary: String(toBaseMoney(e.target.value)) })} style={{ paddingRight: 60 }} />
+                  <input ref={salaryInputRef} id="employee-monthly-salary" className="input-base" type="text" inputMode="numeric" placeholder={tx("Masalan: 3,000,000")} value={moneyInputValue(form.monthlySalary, true)} onChange={handleMonthlySalaryChange} style={{ paddingRight: 60 }} />
                   <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: 13 }}>{tx("so'm")}</span>
                 </div>
               </div>

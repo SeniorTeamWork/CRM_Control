@@ -6,7 +6,7 @@ import { useLanguage as useUILanguage } from "./context/LanguageContext";
 import './App.css';
 import './BackButton.css';
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ShoppingCart } from "lucide-react";
 import { ThemeProvider } from "./context/ThemeContext";
 import { ToastProvider } from "./context/ToastContext";
 import { LanguageProvider } from "./context/LanguageContext";
@@ -304,6 +304,7 @@ function Shell({ onLogout, user, initialPage }) {
   const [collapsed, setCollapsed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [posCartOpen, setPosCartOpen] = useState(false);
+  const [saleSectionPickerOpen, setSaleSectionPickerOpen] = useState(false);
   const [selectedSaleSection, setSelectedSaleSection] = useState("");
   const [selectedSaleSectionWorkspace, setSelectedSaleSectionWorkspace] = useState("");
   const [defectCatalogOpen, setDefectCatalogOpen] = useState(false);
@@ -508,7 +509,7 @@ function Shell({ onLogout, user, initialPage }) {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Topbar onNavigate={navigate} onSelectSaleSection={selectSaleSection} notifCount={unread} user={user} profile={profile} />
+        <Topbar onNavigate={navigate} onSelectSaleSection={selectSaleSection} saleSectionsOpen={saleSectionPickerOpen} onSaleSectionsOpenChange={setSaleSectionPickerOpen} notifCount={unread} user={user} profile={profile} />
         <div style={{ position: "relative", display: "flex", flex: "1 1 0%", flexDirection: "column", minHeight: 0, minWidth: 0, isolation: "isolate" }}>
         <main ref={contentRef} className={`app-main-view flex-1 overflow-y-auto p-6 ${isPosPage ? "app-pos-main" : ""}${page === "ai-chat" ? " ai-chat-shell-scroll" : ""}`} style={page === "sales-pos" ? { paddingLeft: "clamp(12px, 1.2vw, 24px)", paddingRight: "clamp(12px, 1.2vw, 24px)" } : undefined}>
           <div className={`${isPosPage ? "app-pos-content" : "app-page-content"}${page === "sales-pos" || page === "drafts" ? " app-page-content-fluid" : ""}`}>
@@ -521,6 +522,17 @@ function Shell({ onLogout, user, initialPage }) {
                 className={`app-back-button${isPosPage && posCartOpen ? " is-cart-back" : ""}`}
               >
                 <ArrowLeft size={16} aria-hidden="true" style={{ flexShrink: 0 }} />{tx("Orqaga")}</button>
+            )}
+            {page === "sales-pos" && isPosPage && (
+              <button
+                type="button"
+                className="app-sale-section-picker-trigger"
+                onClick={() => setSaleSectionPickerOpen(true)}
+                aria-label={tx("Sotuv bo‘limini tanlang")}
+                title={tx("Sotuv bo‘limini tanlang")}
+              >
+                <ShoppingCart size={19} aria-hidden="true" />
+              </button>
             )}
             {tx(canAccess(user, page) ? renderPage(page, navigate, goBack, user, setProfile, {
               cartWindowOpen: posCartOpen,

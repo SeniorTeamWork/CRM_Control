@@ -253,37 +253,97 @@
 }
 
 @media (max-width: 700px) {
-  .supplier-page-heading { position: relative; align-items: flex-start; }
-  .supplier-page-heading > div:first-child { max-width: calc(100% - 112px); }
-  .supplier-heading-actions { display: contents; }
+  .supplier-page-heading { position: relative; align-items: flex-start; gap: 12px; }
+  .supplier-page-heading > div:first-child { flex: 1 1 auto; min-width: 0; max-width: none; }
+  .supplier-page-heading h1 { font-size: 20px; line-height: 1.25; }
+  .supplier-heading-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
   .supplier-add-product-btn,
-  .supplier-add-person-btn {
-    position: absolute;
+  .supplier-add-person-btn,
+  .supplier-return-action-btn {
+    position: static;
     display: inline-flex;
-    width: 52px;
-    height: 52px;
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
     align-items: center;
     justify-content: center;
     gap: 0;
     padding: 0;
     border-radius: 12px;
+    box-sizing: border-box;
   }
-  .supplier-add-product-btn { top: -46px; right: 60px; }
-  .supplier-add-person-btn { top: -46px; right: 0; }
+  .supplier-return-action-btn span,
   .supplier-add-product-btn span,
   .supplier-add-person-btn span { display: none; }
+  .supplier-return-action-btn svg,
   .supplier-add-product-btn svg,
-  .supplier-add-person-btn svg { width: 28px; height: 28px; }
+  .supplier-add-person-btn svg {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    stroke-width: 2.1;
+  }
 
   .suppliers-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 10px;
+    gap: 8px;
   }
 
   .supplier-stat-card {
     min-width: 0;
-    min-height: 112px;
-    padding: 13px;
+    min-height: 96px;
+    padding: 10px !important;
+    box-sizing: border-box;
+  }
+
+  .supplier-stat-card > div:first-child {
+    width: 34px;
+    height: 34px;
+    margin-bottom: 8px !important;
+    padding: 8px !important;
+    box-sizing: border-box;
+  }
+
+  .supplier-stat-card > div:nth-child(2) {
+    font-size: 16px;
+    line-height: 1.2;
+  }
+
+  .supplier-stat-card > div:last-child {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .suppliers-date-filter {
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .suppliers-date-filter > .flex {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .suppliers-date-filter label {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    min-width: 0;
+    line-height: 1.2;
+  }
+
+  .suppliers-date-filter input[type="date"] {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 42px;
+    box-sizing: border-box;
+    padding-inline: 8px;
   }
 
   .suppliers-list-card {

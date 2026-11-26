@@ -395,7 +395,7 @@ export default function Ustolar({ profileUsta, setProfileUsta }) {
             BANNER
         ====================================================== */}
 
-        <div className="flex items-center justify-between gap-4"><div><h1 className="font-display font-bold text-2xl">{tx("Ustalar")}</h1><p className="text-sm mt-0.5" style={{ color: colors.muted }}>{tx("Xizmat ko'rsatuvchi ustalar va ularning hisoblari")}</p></div><button className="btn-primary usta-add-button" onClick={() => handleOpenModal()}><UserRound size={15}/><Plus size={13}/>{tx("Usta qo‘shish")}</button></div>
+        <div className="flex items-center justify-between gap-4"><div><h1 className="font-display font-bold text-2xl">{tx("Ustalar")}</h1><p className="text-sm mt-0.5" style={{ color: colors.muted }}>{tx("Xizmat ko'rsatuvchi ustalar va ularning hisoblari")}</p></div><button className="btn-primary usta-add-button" aria-label={tx("Usta qo‘shish")} title={tx("Usta qo‘shish")} onClick={() => handleOpenModal()}><UserRound size={15}/><Plus size={13}/><span>{tx("Usta qo‘shish")}</span></button></div>
         {/* ======================================================
             STATS
         ====================================================== */}
@@ -1251,7 +1251,7 @@ if (
       }
 
       div[data-ustolar-stats="true"] {
-        grid-template-columns: 1fr !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
       }
     }
   `;

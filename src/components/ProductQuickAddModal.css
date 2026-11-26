@@ -92,4 +92,82 @@
 .product-quick-defect-quantity { display: grid; align-content: end; gap: 4px; width: 112px; flex: 0 0 112px; }
 .product-quick-defect-quantity label { overflow: hidden; color: var(--text-primary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .product-quick-defect-quantity .product-quick-defect-stepper { width: 112px; }
-@media (max-width: 640px) { .product-quick-defect-quantity-list { order: 3; width: 100%; max-width: 100%; margin: 0; } .product-quick-defect-quantity { flex-basis: 112px; } }
+@media (max-width: 640px) {
+  .product-quick-footer:has(.product-quick-defect-quantity-list) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 12px 10px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-defect-quantity-list {
+    display: block;
+    grid-column: 1;
+    grid-row: 1;
+    order: 0;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-defect-quantity {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-defect-quantity .product-quick-defect-stepper {
+    width: 100%;
+    height: 44px;
+    grid-template-columns: 30px minmax(0, 1fr) 30px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-defect-stepper button {
+    width: 30px;
+    height: 38px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-defect-stepper input {
+    height: 38px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-quantity {
+    grid-column: 2;
+    grid-row: 1;
+    order: 0;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    justify-content: flex-start;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-quantity .product-quick-stepper {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: 30px minmax(0, 1fr) 30px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) .product-quick-stepper button {
+    width: 30px;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) > .product-quick-cancel {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) > .product-quick-add {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .product-quick-footer:has(.product-quick-defect-quantity-list) > .product-quick-cancel,
+  .product-quick-footer:has(.product-quick-defect-quantity-list) > .product-quick-add {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+}

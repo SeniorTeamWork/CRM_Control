@@ -53,7 +53,7 @@ function morphFrames(card, origin) {
   ];
 }
 
-export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, profile }) {
+export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, profile, saleSectionsOpen: controlledSaleSectionsOpen, onSaleSectionsOpenChange }) {
   useUILanguage();
   const { dark, toggle } = useTheme();
   const { lang, setLang, t } = useLanguage();
@@ -67,7 +67,9 @@ export default function Topbar({ onNavigate, onSelectSaleSection, onOpen, user, 
   const [rateLoading, setRateLoading] = useState(false);
   const [rateError, setRateError] = useState("");
   const rateFetchInFlight = useRef(false);
-  const [saleSectionsOpen, setSaleSectionsOpen] = useState(false);
+  const [internalSaleSectionsOpen, setInternalSaleSectionsOpen] = useState(false);
+  const saleSectionsOpen = controlledSaleSectionsOpen ?? internalSaleSectionsOpen;
+  const setSaleSectionsOpen = onSaleSectionsOpenChange ?? setInternalSaleSectionsOpen;
 
   const [customSections, setCustomSections] = useState(() => {
     try { const saved = JSON.parse(localStorage.getItem("crm_custom_sale_sections") || "[]"); return Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : []; } catch { return []; }

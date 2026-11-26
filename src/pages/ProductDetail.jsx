@@ -1103,12 +1103,12 @@ export default function ProductDetail({ productId, onBack, animateDefectCount = 
             <Field label={tx("Sotuv narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.price, true)} onChange={(e) => setEditForm({ ...editForm, price: String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
             <Field label={tx("Tan narxi")}><div className="relative"><input placeholder="0" type="text" inputMode="decimal" className="input-base pr-16" value={moneyInputValue(editForm.cost, true)} onChange={(e) => setEditForm({ ...editForm, cost: String(toBaseMoney(e.target.value)) })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-muted)" }}>{currencyLabel()}</span></div></Field>
           </div>
-          <section className="rounded-xl p-4" style={{ background: "var(--danger-light)", border: "1px solid var(--danger-border)" }}>
+          <section className="rounded-xl p-4 product-edit-defect-management" style={{ background: "var(--danger-light)", border: "1px solid var(--danger-border)" }}>
             <div className="mb-3"><b className="text-sm" style={{ color: "var(--danger)" }}>{tx("Braklarni boshqarish")}</b><p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>{tx("Qo'shish miqdori joriy brak soniga qo'shiladi. Yangi kirim bo'lsa ombor qoldig'i ham ortadi.")}</p></div>
             <div className="mb-3 rounded-lg px-3 py-2 text-sm" style={{ background: "color-mix(in srgb, var(--danger) 7%, transparent)", color: "var(--text-secondary)" }}>
               {tx("Hozirgi brak miqdori")}: <b style={{ color: "var(--danger)" }}>{defectiveStock} {tx(product.measurementUnit || (product.measurementType === "weight" ? "kg" : "dona"))}</b>
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-3" role="group" aria-label={tx("Brak amali")}>
+            <div className="grid grid-cols-2 gap-2 mb-3 product-edit-defect-actions" role="group" aria-label={tx("Brak amali")}>
               {[{ value: "add", label: "Brak qo'shish" }, { value: "reduce", label: "Brakni kamaytirish" }].map((action) => (
                 <button key={action.value} type="button" aria-pressed={(editForm.defectAction || "add") === action.value} onClick={() => setEditForm({ ...editForm, defectAction: action.value })} className="rounded-lg px-3 py-2 text-sm font-semibold" style={{ border: `1px solid ${(editForm.defectAction || "add") === action.value ? "var(--danger)" : "var(--border)"}`, background: (editForm.defectAction || "add") === action.value ? "var(--surface)" : "transparent", color: (editForm.defectAction || "add") === action.value ? "var(--danger)" : "var(--text-muted)" }}>{tx(action.label)}</button>
               ))}
