@@ -1,7 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { installExitAnimations } from "./utils/motion";
+import { installInspectionDeterrent } from "./utils/inspectionDeterrent";
 import { startSupabase } from "./supabase/db";
+
+// Bu faqat oddiy inspeksiya tugmalarini to'sadi; client kodini maxfiy qilmaydi.
+installInspectionDeterrent();
 
 const rootElement = document.getElementById("root");
 rootElement.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;font:500 15px system-ui,sans-serif;color:#64748b">Yuklanmoqda…</div>';

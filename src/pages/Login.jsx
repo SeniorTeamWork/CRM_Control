@@ -231,6 +231,7 @@ export default function Login({ onLogin, tenantId, tenantInvite }) {
                 >
                   {tx(t("login.password", "Parol"))}
                 </label>
+                {/* Kerak bo'lganda havolani qayta yoqish uchun JSX izohidan chiqaring.
                 <button
                   type="button"
                   onClick={() => setRecovering(true)}
@@ -241,6 +242,7 @@ export default function Login({ onLogin, tenantId, tenantInvite }) {
                 >
                   {tx(t("login.forgot", "Parolni unutdingizmi?"))}
                 </button>
+                */}
               </div>
               <div className="relative">
                 <input
@@ -266,9 +268,11 @@ export default function Login({ onLogin, tenantId, tenantInvite }) {
 
             {error && <div role="alert" className="text-sm" style={{ color: "var(--danger, #ef4444)" }}>
               <p>{tx(error)}</p>
+              {/* Kerak bo'lganda tiklash tugmasini qayta yoqish uchun izohdan chiqaring.
               <button type="button" onClick={() => setRecovering(true)} className="text-xs font-semibold mt-2 underline" style={{ color: "var(--brand)" }}>
                 {tx("Parolni tiklash")}
               </button>
+              */}
             </div>}
             <button
               type="submit"
